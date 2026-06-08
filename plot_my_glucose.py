@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import re
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -17,6 +19,48 @@ OOXML_NS = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 RELS_NS = {"rel": "http://schemas.openxmlformats.org/package/2006/relationships"}
 OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 DEFAULT_MONITOR_GLOB = "Hematonix*_dat.xls*"
+DEFAULT_EVENTS_GLOB = "*melstudio*.txt"
+NON_FOOD_NOTE_PATTERNS = ("велосипед",)
+FOOD_ALIASES = {
+    "картошка": "картофель",
+}
+MONTHS_RU = {
+    "янв": 1,
+    "янв.": 1,
+    "января": 1,
+    "фев": 2,
+    "фев.": 2,
+    "февраля": 2,
+    "мар": 3,
+    "мар.": 3,
+    "марта": 3,
+    "апр": 4,
+    "апр.": 4,
+    "апреля": 4,
+    "май": 5,
+    "мая": 5,
+    "июн": 6,
+    "июн.": 6,
+    "июня": 6,
+    "июл": 7,
+    "июл.": 7,
+    "июля": 7,
+    "авг": 8,
+    "авг.": 8,
+    "августа": 8,
+    "сен": 9,
+    "сен.": 9,
+    "сентября": 9,
+    "окт": 10,
+    "окт.": 10,
+    "октября": 10,
+    "ноя": 11,
+    "ноя.": 11,
+    "ноября": 11,
+    "дек": 12,
+    "дек.": 12,
+    "декабря": 12,
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,11 +78,42 @@ def parse_args() -> argparse.Namespace:
         help="Glucose monitor OOXML file. Defaults to Hematonix*_dat.xls* in dataset dir.",
     )
     parser.add_argument(
+        "--events-file",
+        type=Path,
+        default=None,
+        help="Food/insulin text file. Defaults to *melstudio*.txt in dataset dir.",
+    )
+    parser.add_argument(
+        "--events-year",
+        type=int,
+        default=None,
+        help="Year for food/insulin records because the text file stores dates without year.",
+    )
+    parser.add_argument(
+        "--events-output",
+        type=Path,
+        default=Path("outputs/my_events_dataset.csv"),
+        help="CSV output for parsed food/insulin event dataset.",
+    )
+    parser.add_argument(
+        "--food-vocab-output",
+        type=Path,
+        default=Path("outputs/my_food_vocabulary.csv"),
+        help="CSV output for numbered food vocabulary extracted from notes.",
+    )
+    parser.add_argument(
+        "--vectorized-events-output",
+        type=Path,
+        default=Path("outputs/my_events_vectorized.csv"),
+        help="CSV output for events with numeric multi-hot food vector columns.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=Path("outputs/my_glucose_overview.html"),
         help="Output HTML file.",
     )
+    parser.add_argument("--no-events", action="store_true", help="Do not parse or overlay food/insulin events.")
     show_group = parser.add_mutually_exclusive_group()
     show_group.add_argument(
         "--show",
@@ -82,6 +157,23 @@ def find_monitor_file(dataset_dir: Path, explicit_file: Path | None) -> Path:
         matches = sorted(dataset_dir.glob("*.xls*"))
     if not matches:
         raise FileNotFoundError(f"No .xls/.xlsx monitor file found in {dataset_dir}")
+    return matches[0].resolve()
+
+
+def find_events_file(dataset_dir: Path, explicit_file: Path | None) -> Path:
+    if explicit_file:
+        candidates = [explicit_file] if explicit_file.is_absolute() else [Path.cwd() / explicit_file, dataset_dir / explicit_file]
+        for path in candidates:
+            if path.exists():
+                return path.resolve()
+        searched = "\n".join(f"  - {path}" for path in candidates)
+        raise FileNotFoundError(f"Events file not found. Searched:\n{searched}")
+
+    matches = sorted(dataset_dir.glob(DEFAULT_EVENTS_GLOB))
+    if not matches:
+        matches = sorted(dataset_dir.glob("*.txt"))
+    if not matches:
+        raise FileNotFoundError(f"No food/insulin text file found in {dataset_dir}")
     return matches[0].resolve()
 
 
@@ -177,9 +269,40 @@ def parse_number(value: object) -> float | None:
     if value is None:
         return None
     text = str(value).strip().replace(",", ".")
-    if not text:
+    if not text or text == "-":
         return None
     return pd.to_numeric(text, errors="coerce")
+
+
+def parse_optional_amount(value: object) -> float:
+    number = parse_number(value)
+    if pd.isna(number):
+        return 0.0
+    return float(number)
+
+
+def parse_insulin_pair(value: object) -> tuple[float, float]:
+    text = "" if value is None else str(value).strip()
+    if "/" not in text:
+        return 0.0, 0.0
+    long_text, short_text = text.split("/", 1)
+    return parse_optional_amount(long_text), parse_optional_amount(short_text)
+
+
+def parse_russian_date(date_text: object, time_text: object, year: int) -> pd.Timestamp:
+    date = "" if date_text is None else str(date_text).strip().lower()
+    time = "" if time_text is None else str(time_text).strip()
+    match = re.match(r"^(\d{1,2})\s+([а-яё.]+)$", date)
+    if not match:
+        return pd.NaT
+
+    day = int(match.group(1))
+    month_text = match.group(2)
+    month = MONTHS_RU.get(month_text)
+    if month is None:
+        return pd.NaT
+
+    return pd.to_datetime(f"{year:04d}-{month:02d}-{day:02d} {time}", errors="coerce")
 
 
 def detect_glucose_column(df: pd.DataFrame) -> str:
@@ -228,16 +351,228 @@ def load_glucose_monitor(path: Path) -> tuple[pd.DataFrame, str]:
     return data, unit
 
 
+def infer_events_year(glucose_data: pd.DataFrame, explicit_year: int | None) -> int:
+    if explicit_year is not None:
+        return explicit_year
+    return int(glucose_data["time"].dt.year.mode().iloc[0])
+
+
+def load_food_insulin_events(path: Path, year: int) -> pd.DataFrame:
+    raw = pd.read_csv(path, sep="\t", dtype=str, encoding="utf-8-sig")
+    raw = raw.loc[:, ~raw.columns.str.startswith("Unnamed")]
+    required = {"Дата", "Время", "Длинный инсулин/Короткий инсулин", "ХЕ", "Примечания"}
+    missing = required.difference(raw.columns)
+    if missing:
+        raise ValueError(f"{path} is missing columns: {sorted(missing)}")
+
+    records = []
+    for _, row in raw.iterrows():
+        long_insulin, short_insulin = parse_insulin_pair(row["Длинный инсулин/Короткий инсулин"])
+        note = "" if pd.isna(row["Примечания"]) else str(row["Примечания"]).strip()
+        if note == "-":
+            note = ""
+        records.append(
+            {
+                "time": parse_russian_date(row["Дата"], row["Время"], year),
+                "carbs_xe": parse_optional_amount(row["ХЕ"]),
+                "long_insulin_units": long_insulin,
+                "short_insulin_units": short_insulin,
+                "notes": note,
+            }
+        )
+
+    events = pd.DataFrame(records).dropna(subset=["time"]).sort_values("time").reset_index(drop=True)
+    if events.empty:
+        raise ValueError(f"No valid food/insulin rows parsed from {path}")
+    return events
+
+
+def add_glucose_at_event(events: pd.DataFrame, glucose_data: pd.DataFrame) -> pd.DataFrame:
+    if events.empty:
+        events["glucose_at_event"] = pd.Series(dtype=float)
+        return events
+
+    glucose_times = glucose_data["time"].astype("int64").to_numpy()
+    glucose_values = glucose_data["glucose"].to_numpy(dtype=float)
+    event_times = events["time"].astype("int64").to_numpy()
+    interpolated = np.interp(event_times, glucose_times, glucose_values, left=np.nan, right=np.nan)
+
+    events = events.copy()
+    events["glucose_at_event"] = interpolated
+    return events
+
+
+def save_events_dataset(events: pd.DataFrame, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    events.to_csv(output, index=False)
+    print(f"Saved parsed food/insulin dataset to {output.resolve()}")
+
+
+def normalize_food_token(value: object) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+
+    token = str(value).strip().lower().replace("ё", "е")
+    token = re.sub(r"\s+", " ", token)
+    token = token.strip(" .,:;")
+    if not token or token == "-":
+        return None
+
+    return FOOD_ALIASES.get(token, token)
+
+
+def extract_food_tokens(note: object) -> list[str]:
+    if note is None or pd.isna(note):
+        return []
+
+    note_text = str(note).strip()
+    normalized_note = note_text.lower().replace("ё", "е")
+    if not normalized_note or normalized_note == "-":
+        return []
+    if any(pattern in normalized_note for pattern in NON_FOOD_NOTE_PATTERNS):
+        return []
+
+    tokens: list[str] = []
+    for part in re.split(r"[,;]", note_text):
+        token = normalize_food_token(part)
+        if token and token not in tokens:
+            tokens.append(token)
+    return tokens
+
+
+def build_food_vocabulary(events: pd.DataFrame) -> pd.DataFrame:
+    counts: Counter[str] = Counter()
+    first_seen: dict[str, pd.Timestamp] = {}
+
+    for _, row in events.iterrows():
+        for token in extract_food_tokens(row["notes"]):
+            counts[token] += 1
+            first_seen.setdefault(token, row["time"])
+
+    rows = []
+    for food_name in sorted(counts, key=lambda name: (first_seen[name], name)):
+        rows.append(
+            {
+                "food_id": len(rows) + 1,
+                "food_name": food_name,
+                "count": counts[food_name],
+                "first_seen": first_seen[food_name],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def vectorize_food_notes(events: pd.DataFrame, vocabulary: pd.DataFrame) -> pd.DataFrame:
+    vectorized = events.copy()
+    tokens_by_row = [extract_food_tokens(note) for note in vectorized["notes"]]
+    food_id_by_name = dict(zip(vocabulary["food_name"], vocabulary["food_id"]))
+
+    vectorized["food_ids"] = [
+        "|".join(str(food_id_by_name[token]) for token in tokens if token in food_id_by_name)
+        for tokens in tokens_by_row
+    ]
+    vectorized["food_names"] = ["|".join(tokens) for tokens in tokens_by_row]
+
+    for _, row in vocabulary.iterrows():
+        column = f"food_{int(row['food_id']):03d}"
+        food_name = row["food_name"]
+        vectorized[column] = [1 if food_name in tokens else 0 for tokens in tokens_by_row]
+
+    return vectorized
+
+
+def save_food_features(
+    events: pd.DataFrame,
+    vocabulary_output: Path,
+    vectorized_output: Path,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    vocabulary = build_food_vocabulary(events)
+    vectorized = vectorize_food_notes(events, vocabulary)
+
+    vocabulary_output.parent.mkdir(parents=True, exist_ok=True)
+    vectorized_output.parent.mkdir(parents=True, exist_ok=True)
+    vocabulary.to_csv(vocabulary_output, index=False)
+    vectorized.to_csv(vectorized_output, index=False)
+
+    print(f"Saved numbered food vocabulary to {vocabulary_output.resolve()}")
+    print(f"Saved vectorized event dataset to {vectorized_output.resolve()}")
+    return vocabulary, vectorized
+
+
 def target_range(unit: str) -> tuple[float, float]:
     if unit == "mg/dL":
         return 70.0, 180.0
     return 3.9, 10.0
 
 
-def plot_glucose(data: pd.DataFrame, unit: str, source_path: Path, output: Path, show: bool) -> None:
+def marker_sizes(values: pd.Series, base: float = 9.0, scale: float = 1.6, max_size: float = 26.0) -> pd.Series:
+    return (base + values.fillna(0) * scale).clip(upper=max_size)
+
+
+def add_event_trace(
+    fig: go.Figure,
+    events: pd.DataFrame,
+    value_column: str,
+    name: str,
+    unit_label: str,
+    color: str,
+    symbol: str,
+    glucose_unit: str,
+) -> None:
+    selected = events.loc[(events[value_column] > 0) & events["glucose_at_event"].notna()].copy()
+    if selected.empty:
+        return
+
+    customdata = np.column_stack(
+        [
+            selected[value_column].to_numpy(),
+            selected["carbs_xe"].to_numpy(),
+            selected["short_insulin_units"].to_numpy(),
+            selected["long_insulin_units"].to_numpy(),
+            selected["notes"].to_numpy(),
+        ]
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=selected["time"],
+            y=selected["glucose_at_event"],
+            mode="markers",
+            name=name,
+            customdata=customdata,
+            marker=dict(
+                color=color,
+                symbol=symbol,
+                size=marker_sizes(selected[value_column]),
+                line=dict(color="#111111", width=0.8),
+                opacity=0.82,
+            ),
+            hovertemplate=(
+                "%{x|%Y-%m-%d %H:%M}<br>"
+                f"Глюкоза: %{{y:.2f}} {glucose_unit}<br>"
+                f"{unit_label}: %{{customdata[0]:.2f}}<br>"
+                "ХЕ: %{customdata[1]:.2f}<br>"
+                "Короткий инсулин: %{customdata[2]:.2f} U<br>"
+                "Длинный инсулин: %{customdata[3]:.2f} U<br>"
+                "Примечание: %{customdata[4]}"
+                f"<extra>{name}</extra>"
+            ),
+        )
+    )
+
+
+def plot_glucose(
+    data: pd.DataFrame,
+    unit: str,
+    source_path: Path,
+    output: Path,
+    show: bool,
+    events: pd.DataFrame | None = None,
+    events_source_path: Path | None = None,
+) -> None:
     low, high = target_range(unit)
     start = data["time"].min().strftime("%Y-%m-%d %H:%M")
     end = data["time"].max().strftime("%Y-%m-%d %H:%M")
+    events = pd.DataFrame() if events is None else events
 
     fig = go.Figure()
     fig.add_hrect(y0=low, y1=high, fillcolor="#d8f0d2", opacity=0.45, line_width=0)
@@ -253,10 +588,25 @@ def plot_glucose(data: pd.DataFrame, unit: str, source_path: Path, output: Path,
             hovertemplate=f"%{{x|%Y-%m-%d %H:%M}}<br>%{{y:.2f}} {unit}<extra>Glucose</extra>",
         )
     )
+    add_event_trace(fig, events, "carbs_xe", "Углеводы", "ХЕ", "#ffbf00", "circle", unit)
+    add_event_trace(fig, events, "short_insulin_units", "Короткий инсулин", "Инсулин U", "#d62728", "triangle-down", unit)
+    add_event_trace(fig, events, "long_insulin_units", "Длинный инсулин", "Инсулин U", "#9467bd", "diamond", unit)
+
+    event_summary = ""
+    if not events.empty:
+        carbs_count = int((events["carbs_xe"] > 0).sum())
+        short_count = int((events["short_insulin_units"] > 0).sum())
+        long_count = int((events["long_insulin_units"] > 0).sum())
+        event_source = f"; {events_source_path.name}" if events_source_path else ""
+        event_summary = (
+            f"; events={len(events)}{event_source}; "
+            f"carbs={carbs_count}, short insulin={short_count}, long insulin={long_count}"
+        )
+
     fig.update_layout(
         title=(
             f"Personal glucose monitor data ({start} to {end})<br>"
-            f"<sup>{source_path.name}; rows={len(data)}</sup>"
+            f"<sup>{source_path.name}; glucose rows={len(data)}{event_summary}</sup>"
         ),
         template="plotly_white",
         height=720,
@@ -283,7 +633,20 @@ def main() -> None:
     dataset_dir = find_dataset_dir(args.dataset_dir)
     monitor_file = find_monitor_file(dataset_dir, args.monitor_file)
     data, unit = load_glucose_monitor(monitor_file)
-    plot_glucose(data, unit, monitor_file, args.output, args.show)
+
+    events = None
+    events_file = None
+    if not args.no_events:
+        events_file = find_events_file(dataset_dir, args.events_file)
+        events_year = infer_events_year(data, args.events_year)
+        events = load_food_insulin_events(events_file, events_year)
+        events = add_glucose_at_event(events, data)
+        save_events_dataset(events, args.events_output)
+        vocabulary, _vectorized = save_food_features(events, args.food_vocab_output, args.vectorized_events_output)
+        print(f"Parsed {len(events)} food/insulin rows from {events_file}")
+        print(f"Extracted {len(vocabulary)} numbered food variants from notes")
+
+    plot_glucose(data, unit, monitor_file, args.output, args.show, events, events_file)
 
 
 if __name__ == "__main__":
