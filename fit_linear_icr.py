@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Fit a first linear/Ridge model for meal glucose response and estimate ICR."""
+"""Fit a first linear/Ridge model for meal glucose response and estimate ICR.
+
+This script works with the meal-level dataset produced by build_meal_dataset.py.
+It trains a simple interpretable model for post-meal glucose change, estimates a
+practical insulin-to-carb ratio, and writes diagnostic Plotly charts.
+"""
 
 from __future__ import annotations
 
@@ -36,6 +41,14 @@ BASE_FEATURES = [
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line options for training, reports, and plots.
+
+    The defaults are chosen for the local project layout: the meal dataset is
+    read from outputs/my_meal_model_dataset.csv and generated reports are written
+    back to outputs/. Optional flags allow disabling food features, filtering
+    hypoglycemia rows, changing the Ridge penalty, or opening generated HTML
+    charts automatically.
+    """
     parser = argparse.ArgumentParser(
         description=(
             "Fit an interpretable Ridge model for post-meal glucose delta. "
@@ -51,6 +64,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-food-count", type=int, default=2, help="Only include food columns appearing at least this often.")
     parser.add_argument("--coefficients-output", type=Path, default=Path("outputs/linear_icr_coefficients.csv"))
     parser.add_argument("--report-output", type=Path, default=Path("outputs/linear_icr_report.json"))
+    parser.add_argument(
+        "--icr-output",
+        type=Path,
+        default=Path("outputs/linear_icr_practical_icr.csv"),
+        help="Per-meal marginal +1 XE ICR estimates.",
+    )
     parser.add_argument("--plot-output", type=Path, default=Path("outputs/linear_icr_actual_vs_predicted.html"))
     parser.add_argument(
         "--dataset-dir",
@@ -77,6 +96,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def selected_feature_columns(df: pd.DataFrame, include_food: bool, min_food_count: int) -> list[str]:
+    """Return the model feature list that is actually available in the dataset.
+
+    BASE_FEATURES defines the stable hand-engineered features. Food features are
+    optional multi-hot columns named food_001, food_002, and so on. Rare food
+    columns can easily overfit a small personal dataset, so min_food_count keeps
+    only food indicators that appear in at least that many rows.
+    """
     features = [column for column in BASE_FEATURES if column in df.columns]
     if include_food:
         for column in sorted(c for c in df.columns if c.startswith("food_") and c[5:].isdigit()):
@@ -86,6 +112,14 @@ def selected_feature_columns(df: pd.DataFrame, include_food: bool, min_food_coun
 
 
 def prepare_training_frame(df: pd.DataFrame, target: str, min_carbs_xe: float, drop_hypo: bool) -> pd.DataFrame:
+    """Filter the meal dataset down to rows suitable for model fitting.
+
+    The target is usually a column such as delta_glucose_3h. Rows must have a
+    meal with at least min_carbs_xe carbohydrates and a known short-insulin dose.
+    When drop_hypo is enabled, rows with hypoglycemia in the next 4 hours are
+    removed so they do not pull the regression toward intentionally lower
+    post-meal glucose outcomes.
+    """
     if target not in df.columns:
         raise ValueError(f"Target column {target!r} not found.")
 
@@ -99,6 +133,14 @@ def prepare_training_frame(df: pd.DataFrame, target: str, min_carbs_xe: float, d
 
 
 def standardize_matrix(x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Standardize a numeric design matrix for stable Ridge fitting.
+
+    Ridge penalties depend on feature scale. Standardizing keeps large-unit
+    features from being penalized differently than small-unit features. Missing
+    values are filled with the column mean before scaling; the returned means and
+    standard deviations are later used to convert coefficients back to the
+    original units.
+    """
     means = np.nanmean(x, axis=0)
     stds = np.nanstd(x, axis=0)
     stds[~np.isfinite(stds) | (stds == 0)] = 1.0
@@ -111,12 +153,23 @@ def fit_ridge(
     y: np.ndarray,
     alpha: float,
 ) -> tuple[np.ndarray, float, np.ndarray]:
+    """Fit Ridge regression using NumPy and return coefficients in raw units.
+
+    The model is linear:
+        y = intercept + X @ coefficients
+
+    Internally, features are standardized before solving the penalized normal
+    equations. The intercept is not penalized. After fitting, coefficients are
+    transformed back to the original feature units so they can be interpreted in
+    mmol/L per XE, mmol/L per insulin unit, and similar practical units.
+    """
     x_scaled, means, stds = standardize_matrix(x)
     design = np.column_stack([np.ones(len(x_scaled)), x_scaled])
     penalty = np.eye(design.shape[1]) * alpha
     penalty[0, 0] = 0.0
     coef_scaled = np.linalg.solve(design.T @ design + penalty, design.T @ y)
 
+    # Convert standardized coefficients back to the original feature scale.
     intercept = coef_scaled[0] - np.sum(coef_scaled[1:] * means / stds)
     coefficients = coef_scaled[1:] / stds
     x_filled = np.where(np.isfinite(x), x, means)
@@ -125,6 +178,13 @@ def fit_ridge(
 
 
 def regression_metrics(y: np.ndarray, pred: np.ndarray) -> dict[str, float]:
+    """Compute basic in-sample regression quality metrics.
+
+    MAE and RMSE are reported in the same unit as the target, typically mmol/L.
+    R2 compares the model with predicting the mean target value. baseline_rmse is
+    the RMSE of that mean-only baseline and helps judge whether the fitted model
+    is doing better than a trivial predictor.
+    """
     residuals = y - pred
     mae = float(np.mean(np.abs(residuals)))
     rmse = float(np.sqrt(np.mean(residuals**2)))
@@ -135,7 +195,15 @@ def regression_metrics(y: np.ndarray, pred: np.ndarray) -> dict[str, float]:
     return {"mae": mae, "rmse": rmse, "r2": r2, "baseline_rmse": baseline_rmse}
 
 
-def estimate_icr(coefficients: dict[str, float]) -> dict[str, float | str | None]:
+def estimate_coefficient_ratio_icr(coefficients: dict[str, float]) -> dict[str, float | str | None]:
+    """Compute the old direct coefficient-ratio ICR diagnostic.
+
+    This estimate divides the carbs_xe coefficient by the negative
+    short_insulin_units coefficient. It is only reliable when carbs_xe is the
+    only current-meal carbohydrate feature. In this project it is intentionally
+    kept as a diagnostic because Bateman-derived carb features split the
+    carbohydrate effect across several correlated columns.
+    """
     carb_coef = coefficients.get("carbs_xe")
     insulin_coef = coefficients.get("short_insulin_units")
     if carb_coef is None or insulin_coef is None:
@@ -152,11 +220,210 @@ def estimate_icr(coefficients: dict[str, float]) -> dict[str, float | str | None
     insulin_units_per_xe = carb_coef / (-insulin_coef)
     return {
         "status": "ok",
+        "method": "single_coefficient_ratio",
         "insulin_units_per_xe": float(insulin_units_per_xe),
         "xe_per_insulin_unit": float(1.0 / insulin_units_per_xe),
         "carbs_xe_coef_mmol_l": float(carb_coef),
         "short_insulin_coef_mmol_l": float(insulin_coef),
     }
+
+
+def numeric_feature_frame(frame: pd.DataFrame, features: list[str]) -> pd.DataFrame:
+    """Select feature columns and coerce them to numeric values.
+
+    CSV inputs can preserve empty cells or mixed values as strings. Coercing
+    here gives the model a clean numeric matrix and turns invalid values into
+    NaN, which fit_ridge then fills with feature means.
+    """
+    return frame[features].apply(pd.to_numeric, errors="coerce")
+
+
+def xe_grams_from_frame(frame: pd.DataFrame) -> float:
+    """Infer how many carbohydrate grams one XE represents in the dataset.
+
+    build_meal_dataset.py currently writes carbs_grams = carbs_xe * 12 by
+    default. This function reads the ratio back from data when possible, falling
+    back to 12 g/XE if the grams column is missing or unusable.
+    """
+    if "carbs_grams" not in frame.columns:
+        return 12.0
+    carbs_xe = pd.to_numeric(frame["carbs_xe"], errors="coerce")
+    carbs_grams = pd.to_numeric(frame["carbs_grams"], errors="coerce")
+    ratios = (carbs_grams / carbs_xe).replace([np.inf, -np.inf], np.nan).dropna()
+    if ratios.empty:
+        return 12.0
+    return float(ratios.median())
+
+
+def current_meal_carb_delta(
+    train: pd.DataFrame,
+    features: list[str],
+    xe_delta: float,
+) -> pd.DataFrame:
+    """Build the feature change caused by adding xe_delta to the current meal.
+
+    The practical ICR calculation asks: "If this meal had +1 XE, how much extra
+    short insulin would keep the model prediction unchanged?" The raw carbs_xe
+    column grows by xe_delta. Bateman current-meal absorption features also grow
+    proportionally because they are deterministic fractions of the same meal
+    carbohydrate amount.
+    """
+    delta = pd.DataFrame(0.0, index=train.index, columns=features)
+    if "carbs_xe" in delta.columns:
+        delta["carbs_xe"] = xe_delta
+    if "carbs_grams" in delta.columns:
+        delta["carbs_grams"] = xe_delta * xe_grams_from_frame(train)
+
+    carbs_xe = pd.to_numeric(train["carbs_xe"], errors="coerce").replace(0, np.nan)
+    for column in [feature for feature in features if feature.startswith("meal_carb_absorbed_xe_")]:
+        # Each current-meal Bateman feature is proportional to carbs_xe, so the
+        # per-XE ratio tells us how much that feature changes for +1 XE.
+        ratios = (pd.to_numeric(train[column], errors="coerce") / carbs_xe).replace([np.inf, -np.inf], np.nan)
+        fallback = float(ratios.dropna().median()) if not ratios.dropna().empty else 0.0
+        delta[column] = xe_delta * ratios.fillna(fallback)
+    return delta
+
+
+def summarize_series(series: pd.Series, prefix: str) -> dict[str, float]:
+    """Summarize a numeric series using stable descriptive statistics.
+
+    The output keys are prefixed so several summaries can be merged into one
+    JSON report without naming collisions. NaN and infinite values are removed
+    before the mean, median, standard deviation, and p10/p90 quantiles are
+    computed.
+    """
+    values = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if values.empty:
+        return {
+            f"{prefix}_mean": float("nan"),
+            f"{prefix}_median": float("nan"),
+            f"{prefix}_std": float("nan"),
+            f"{prefix}_p10": float("nan"),
+            f"{prefix}_p90": float("nan"),
+        }
+    return {
+        f"{prefix}_mean": float(values.mean()),
+        f"{prefix}_median": float(values.median()),
+        f"{prefix}_std": float(values.std(ddof=0)),
+        f"{prefix}_p10": float(values.quantile(0.10)),
+        f"{prefix}_p90": float(values.quantile(0.90)),
+    }
+
+
+def observed_dose_per_xe_summary(train: pd.DataFrame) -> dict[str, float | int]:
+    """Summarize the actually recorded bolus dose per XE.
+
+    This is not a model estimate. It is a sanity-check baseline from the diary:
+    short_insulin_units / carbs_xe for rows where both are positive. Comparing
+    this with the model-derived practical ICR helps detect unstable or implausible
+    model behavior.
+    """
+    dose_rows = train.loc[(train["carbs_xe"] > 0) & (train["short_insulin_units"] > 0)].copy()
+    dose_per_xe = dose_rows["short_insulin_units"] / dose_rows["carbs_xe"]
+    summary: dict[str, float | int] = {
+        "row_count": int(len(dose_rows)),
+        "xe_grams": xe_grams_from_frame(train),
+    }
+    summary.update(summarize_series(dose_per_xe, "insulin_units_per_xe"))
+    median = summary["insulin_units_per_xe_median"]
+    summary["xe_per_insulin_unit_median"] = float(1.0 / median) if np.isfinite(median) and median > 0 else float("nan")
+    summary["grams_per_insulin_unit_median"] = (
+        float(summary["xe_grams"] / median) if np.isfinite(median) and median > 0 else float("nan")
+    )
+    return summary
+
+
+def estimate_practical_icr(
+    train: pd.DataFrame,
+    features: list[str],
+    coefficients: np.ndarray,
+    coefficient_map: dict[str, float],
+    output: Path,
+    xe_delta: float = 1.0,
+) -> dict[str, float | int | str | list[str] | None]:
+    """Estimate a practical ICR by marginal simulation of +1 XE.
+
+    For every meal row, the function creates a synthetic feature delta that adds
+    xe_delta carbohydrates to the same meal context. Because the fitted model is
+    linear, the predicted glucose increase from extra carbs is simply:
+
+        carb_effect = feature_delta @ coefficients
+
+    The extra short-insulin dose needed to offset that glucose increase is found
+    by solving:
+
+        carb_effect + extra_insulin * insulin_coef = 0
+
+    Therefore:
+
+        extra_insulin = -carb_effect / insulin_coef
+
+    The per-row results are written to CSV and a robust aggregate summary is
+    returned for the JSON report. This is still a research estimate, not a dosing
+    recommendation.
+    """
+    insulin_coef = coefficient_map.get("short_insulin_units")
+    if insulin_coef is None:
+        return {"status": "missing_insulin_coefficient", "method": "marginal_plus_1_xe"}
+    if insulin_coef >= 0:
+        return {
+            "status": "unexpected_insulin_sign",
+            "method": "marginal_plus_1_xe",
+            "short_insulin_coef_mmol_l": float(insulin_coef),
+        }
+
+    carb_delta = current_meal_carb_delta(train, features, xe_delta)
+    changed_carb_features = [column for column in features if float(carb_delta[column].abs().max()) > 0]
+    # Linear marginal effect of adding carbohydrates to the current meal.
+    carb_effect = carb_delta.to_numpy(dtype=float) @ coefficients
+    # Extra insulin that would bring the linear prediction back to the old value.
+    required_insulin = -carb_effect / insulin_coef
+
+    rows = train[["time", "carbs_xe", "short_insulin_units", "glucose_at_meal", "notes"]].copy()
+    rows["carb_delta_xe"] = xe_delta
+    rows["predicted_glucose_delta_from_plus_1_xe_mmol_l"] = carb_effect
+    rows["extra_short_insulin_units_to_offset_plus_1_xe"] = required_insulin
+    rows["short_insulin_coef_mmol_l_per_unit"] = insulin_coef
+    output.parent.mkdir(parents=True, exist_ok=True)
+    rows.to_csv(output, index=False)
+
+    valid = rows.loc[
+        np.isfinite(rows["extra_short_insulin_units_to_offset_plus_1_xe"])
+        & np.isfinite(rows["predicted_glucose_delta_from_plus_1_xe_mmol_l"])
+        & (rows["extra_short_insulin_units_to_offset_plus_1_xe"] > 0)
+        & (rows["predicted_glucose_delta_from_plus_1_xe_mmol_l"] > 0)
+    ]
+    if valid.empty:
+        return {
+            "status": "no_positive_marginal_estimates",
+            "method": "marginal_plus_1_xe",
+            "row_count": int(len(rows)),
+            "valid_row_count": 0,
+            "short_insulin_coef_mmol_l_per_unit": float(insulin_coef),
+            "carb_features_changed": changed_carb_features,
+        }
+
+    insulin_per_xe = valid["extra_short_insulin_units_to_offset_plus_1_xe"] / xe_delta
+    glucose_delta = valid["predicted_glucose_delta_from_plus_1_xe_mmol_l"] / xe_delta
+    xe_grams = xe_grams_from_frame(train)
+    median_insulin = float(insulin_per_xe.median())
+
+    summary: dict[str, float | int | str | list[str] | None] = {
+        "status": "ok",
+        "method": "marginal_plus_1_xe_offset",
+        "row_count": int(len(rows)),
+        "valid_row_count": int(len(valid)),
+        "carb_delta_xe": float(xe_delta),
+        "xe_grams": float(xe_grams),
+        "short_insulin_coef_mmol_l_per_unit": float(insulin_coef),
+        "carb_features_changed": changed_carb_features,
+        "insulin_feature_changed": "short_insulin_units",
+        "xe_per_insulin_unit_median": float(1.0 / median_insulin),
+        "grams_per_insulin_unit_median": float(xe_grams / median_insulin),
+    }
+    summary.update(summarize_series(insulin_per_xe, "insulin_units_per_xe"))
+    summary.update(summarize_series(glucose_delta, "predicted_glucose_delta_mmol_l_per_xe"))
+    return summary
 
 
 def save_actual_vs_predicted_plot(
@@ -166,6 +433,13 @@ def save_actual_vs_predicted_plot(
     output: Path,
     show: bool,
 ) -> None:
+    """Save a scatter plot comparing actual target values with predictions.
+
+    This chart is a compact fit diagnostic. Points near the dashed diagonal are
+    meals where the model predicted the target delta well. Points far from the
+    diagonal show meals that may need better features, different absorption
+    assumptions, or more data.
+    """
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -195,6 +469,11 @@ def save_actual_vs_predicted_plot(
 
 
 def parse_target_horizon(target: str) -> tuple[float, str] | None:
+    """Extract the forecast horizon from a target name like delta_glucose_3h.
+
+    The returned tuple contains the numeric horizon in hours and the original
+    string label used to find related columns such as glucose_plus_3h.
+    """
     match = re.search(r"_(\d+(?:\.\d+)?)h$", target)
     if not match:
         return None
@@ -202,16 +481,30 @@ def parse_target_horizon(target: str) -> tuple[float, str] | None:
 
 
 def target_prediction_time(times: pd.Series, horizon_hours: float) -> pd.Series:
+    """Convert meal times into target times by adding the forecast horizon."""
     return times + pd.to_timedelta(horizon_hours, unit="h")
 
 
 def predicted_glucose_values(train: pd.DataFrame, target: str, predictions: np.ndarray) -> np.ndarray:
+    """Convert model target predictions into absolute glucose values.
+
+    The model usually predicts a delta, for example delta_glucose_3h. For overlay
+    plots we need absolute glucose, so the predicted delta is added to the
+    measured glucose_at_meal. If the target is already absolute glucose, the
+    predictions are returned unchanged.
+    """
     if target.startswith("delta_glucose_"):
         return train["glucose_at_meal"].to_numpy(dtype=float) + predictions
     return predictions
 
 
 def actual_glucose_values(train: pd.DataFrame, target: str, horizon_label: str) -> pd.Series:
+    """Return absolute observed glucose values for the prediction horizon.
+
+    Prefer the direct glucose_plus_Nh column from the meal dataset. If it is not
+    available but the target is a delta column, reconstruct the absolute value by
+    adding the observed delta to glucose_at_meal.
+    """
     direct_column = f"glucose_plus_{horizon_label}h"
     if direct_column in train.columns:
         return pd.to_numeric(train[direct_column], errors="coerce")
@@ -229,6 +522,13 @@ def save_glucose_overlay_plot(
     output: Path,
     show: bool,
 ) -> None:
+    """Save an interactive time-series plot with real and predicted glucose.
+
+    The plot overlays the continuous monitor glucose curve, meal/bolus markers,
+    actual glucose at the target horizon, and predicted glucose at that same
+    horizon. Vertical segments show the prediction error for each meal, making it
+    easier to see whether errors cluster in time or around specific foods.
+    """
     horizon = parse_target_horizon(target)
     if horizon is None:
         raise ValueError(f"Cannot infer forecast horizon from target column {target!r}.")
@@ -386,18 +686,33 @@ def save_glucose_overlay_plot(
 
 
 def main() -> None:
+    """Run the complete training, reporting, and plotting workflow.
+
+    The workflow reads the meal dataset, filters training rows, fits Ridge,
+    writes coefficients and JSON reports, saves ICR diagnostics, and generates
+    Plotly HTML charts. File paths and filtering behavior are controlled through
+    parse_args().
+    """
     args = parse_args()
     df = pd.read_csv(args.input, parse_dates=["time"])
     train = prepare_training_frame(df, args.target, args.min_carbs_xe, drop_hypo=args.drop_hypo)
     features = selected_feature_columns(train, include_food=not args.no_food, min_food_count=args.min_food_count)
     train = train.dropna(subset=[args.target])
-    x = train[features].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+    x = numeric_feature_frame(train, features).to_numpy(dtype=float)
     y = train[args.target].to_numpy(dtype=float)
 
     coefficients, intercept, predictions = fit_ridge(x, y, args.alpha)
     metrics = regression_metrics(y, predictions)
     coefficient_map = dict(zip(features, coefficients))
-    icr = estimate_icr(coefficient_map)
+    coefficient_ratio_icr = estimate_coefficient_ratio_icr(coefficient_map)
+    practical_icr = estimate_practical_icr(
+        train,
+        features,
+        coefficients,
+        coefficient_map,
+        args.icr_output,
+    )
+    observed_dose_summary = observed_dose_per_xe_summary(train)
 
     coef_df = pd.DataFrame(
         {
@@ -416,10 +731,14 @@ def main() -> None:
         "rows": int(len(train)),
         "features": features,
         "metrics": metrics,
-        "icr_estimate": icr,
+        "icr_estimate": practical_icr,
+        "practical_icr_estimate": practical_icr,
+        "coefficient_ratio_icr_estimate": coefficient_ratio_icr,
+        "observed_dose_per_xe": observed_dose_summary,
         "warnings": [
             "Research-only estimate. Do not use for real dosing decisions.",
             "Small dataset; food effects and ICR can be unstable.",
+            "Practical ICR is a model marginal estimate: +1 XE at meal time offset by extra short insulin.",
         ],
     }
     args.report_output.parent.mkdir(parents=True, exist_ok=True)
@@ -447,8 +766,11 @@ def main() -> None:
     print(f"Training rows: {len(train)}")
     print(f"Features: {len(features)}")
     print(f"MAE={metrics['mae']:.3f} mmol/L RMSE={metrics['rmse']:.3f} R2={metrics['r2']:.3f}")
-    print(f"ICR estimate: {json.dumps(icr, ensure_ascii=False)}")
+    print(f"Practical ICR estimate: {json.dumps(practical_icr, ensure_ascii=False)}")
+    print(f"Coefficient-ratio ICR diagnostic: {json.dumps(coefficient_ratio_icr, ensure_ascii=False)}")
+    print(f"Observed dose per XE: {json.dumps(observed_dose_summary, ensure_ascii=False)}")
     print(f"Saved coefficients to {args.coefficients_output.resolve()}")
+    print(f"Saved practical ICR rows to {args.icr_output.resolve()}")
     print(f"Saved report to {args.report_output.resolve()}")
     print(f"Saved plot to {args.plot_output.resolve()}")
     if glucose_overlay_saved:
