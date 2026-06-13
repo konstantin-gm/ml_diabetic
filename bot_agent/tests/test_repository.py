@@ -69,7 +69,11 @@ async def test_user_carbs_are_saved_and_can_update_cached_food(tmp_path) -> None
 
     async with session_factory() as session:
         found = await FoodRepository(session).find_by_name("МОЙ ХЛЕБ")
+        foods = await FoodRepository(session).list_all()
 
     assert found is not None
     assert found.carbs_per_100g == Decimal("45.50")
+    assert len(foods) == 1
+    assert foods[0].id > 0
+    assert foods[0].created_at is not None
     await engine.dispose()

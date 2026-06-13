@@ -13,6 +13,28 @@ Examples:
 В 30 г батончика 18 г углеводов
 ```
 
+Telegram commands:
+
+```text
+/foods       Show all saved foods in chat
+/export_csv  Download the complete food database as CSV
+```
+
+Access is restricted to users stored in PostgreSQL. Set your Telegram numeric
+ID as the initial administrator before the first start:
+
+```env
+TELEGRAM_ADMIN_IDS=123456789
+```
+
+An unauthorized user receives their numeric ID from the bot. The administrator
+can then grant access in Telegram:
+
+```text
+/add_user 987654321 Иван
+/users
+```
+
 The bot only calculates carbohydrates. It does not recommend insulin doses or
 provide medical advice.
 

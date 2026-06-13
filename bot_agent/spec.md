@@ -106,6 +106,19 @@ Expected flow:
 
 4. Confirm the saved value. Future calculations must use this local value.
 
+Database access in Telegram:
+
+- `/foods` lists all saved foods and carbohydrate values in the chat.
+- `/export_csv` sends the complete food database as a UTF-8 CSV document.
+
+Access control:
+
+- Only active users stored in PostgreSQL may use the bot.
+- Unauthorized users receive their Telegram ID to send to an administrator.
+- Bootstrap administrators are configured through `TELEGRAM_ADMIN_IDS` and saved to PostgreSQL.
+- Administrators add users with `/add_user <telegram_id> [name]`.
+- Administrators view the whitelist with `/users`.
+
 
 ## Database
 
@@ -135,6 +148,20 @@ Create table food_aliases:
 id
 food_id
 alias
+
+Create table telegram_users:
+
+fields:
+
+telegram_user_id
+username
+full_name
+is_admin
+is_active
+added_by_telegram_id
+created_at
+updated_at
+last_seen_at
 
 
 Example:

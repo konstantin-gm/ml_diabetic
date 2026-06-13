@@ -4,11 +4,13 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand
 from openai import AsyncOpenAI
 
 from app.agent.food_agent import create_food_agent
 from app.bot.handlers import create_router
 from app.config import Settings
+from app.database.repositories import TelegramUserRepository
 from app.database.session import create_engine_and_session_factory
 from app.services.online_food import OnlineFoodLookup
 
@@ -21,6 +23,11 @@ async def main() -> None:
     )
 
     engine, session_factory = create_engine_and_session_factory(settings.database_url)
+    admin_ids = settings.parsed_telegram_admin_ids()
+    async with session_factory() as session:
+        await TelegramUserRepository(session).bootstrap_admins(admin_ids)
+        await session.commit()
+
     openai_client = AsyncOpenAI(api_key=settings.openai_api_key.get_secret_value())
     online_lookup = OnlineFoodLookup(openai_client, settings.openai_model)
     agent = create_food_agent(settings.openai_model, openai_client)
@@ -30,6 +37,15 @@ async def main() -> None:
     dispatcher.include_router(create_router(agent, session_factory, online_lookup))
 
     try:
+        await bot.set_my_commands(
+            [
+                BotCommand(command="start", description="Открыть справку"),
+                BotCommand(command="foods", description="Показать базу продуктов"),
+                BotCommand(command="export_csv", description="Скачать базу в CSV"),
+                BotCommand(command="add_user", description="Добавить пользователя"),
+                BotCommand(command="users", description="Показать белый список"),
+            ]
+        )
         await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
     finally:
         await openai_client.close()

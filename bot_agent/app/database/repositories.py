@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.agent.schemas import FoodData
-from app.database.models import Food, FoodAlias
+from app.agent.schemas import FoodData, FoodRecord, TelegramUserRecord
+from app.database.models import Food, FoodAlias, TelegramUser
 
 _WHITESPACE = re.compile(r"\s+")
 
@@ -25,6 +26,11 @@ class FoodRepository:
     async def find_by_name(self, name: str) -> FoodData | None:
         food = await self._find_model_by_name(name)
         return self._to_data(food) if food is not None else None
+
+    async def list_all(self) -> list[FoodRecord]:
+        statement = select(Food).options(selectinload(Food.aliases)).order_by(Food.ru_name, Food.id)
+        foods = (await self._session.scalars(statement)).all()
+        return [self._to_record(food) for food in foods]
 
     async def save_user_carbs(self, name: str, carbs_per_100g: Decimal) -> FoodData:
         normalized = normalize_food_name(name)
@@ -117,3 +123,112 @@ class FoodRepository:
             confidence=food.confidence,
             aliases=[alias.alias for alias in food.aliases],
         )
+
+    @staticmethod
+    def _to_record(food: Food) -> FoodRecord:
+        return FoodRecord(
+            id=food.id,
+            canonical_name=food.canonical_name,
+            ru_name=food.ru_name,
+            en_name=food.en_name,
+            carbs_per_100g=food.carbs_per_100g,
+            protein_per_100g=food.protein_per_100g,
+            fat_per_100g=food.fat_per_100g,
+            kcal_per_100g=food.kcal_per_100g,
+            source=food.source,
+            confidence=food.confidence,
+            aliases=[alias.alias for alias in food.aliases],
+            created_at=food.created_at,
+            updated_at=food.updated_at,
+        )
+
+
+class TelegramUserRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, telegram_user_id: int) -> TelegramUserRecord | None:
+        user = await self._session.get(TelegramUser, telegram_user_id)
+        return TelegramUserRecord.model_validate(user) if user is not None else None
+
+    async def is_admin(self, telegram_user_id: int) -> bool:
+        statement = select(TelegramUser.is_admin).where(
+            TelegramUser.telegram_user_id == telegram_user_id,
+            TelegramUser.is_active.is_(True),
+        )
+        return bool(await self._session.scalar(statement))
+
+    async def touch_authorized(
+        self,
+        telegram_user_id: int,
+        username: str | None,
+        full_name: str,
+    ) -> TelegramUserRecord | None:
+        user = await self._session.get(TelegramUser, telegram_user_id)
+        if user is None or not user.is_active:
+            return None
+
+        user.username = username
+        user.full_name = full_name
+        user.last_seen_at = datetime.now(UTC)
+        await self._session.flush()
+        await self._session.refresh(user)
+        return TelegramUserRecord.model_validate(user)
+
+    async def add_user(
+        self,
+        telegram_user_id: int,
+        added_by_telegram_id: int,
+        full_name: str | None = None,
+    ) -> tuple[TelegramUserRecord, bool]:
+        if telegram_user_id <= 0:
+            raise ValueError("telegram_user_id must be positive")
+
+        user = await self._session.get(TelegramUser, telegram_user_id)
+        created = user is None
+        if user is None:
+            user = TelegramUser(
+                telegram_user_id=telegram_user_id,
+                username=None,
+                full_name=full_name,
+                is_admin=False,
+                is_active=True,
+                added_by_telegram_id=added_by_telegram_id,
+            )
+            self._session.add(user)
+        else:
+            user.is_active = True
+            if full_name:
+                user.full_name = full_name
+            if user.added_by_telegram_id is None:
+                user.added_by_telegram_id = added_by_telegram_id
+
+        await self._session.flush()
+        await self._session.refresh(user)
+        return TelegramUserRecord.model_validate(user), created
+
+    async def bootstrap_admins(self, telegram_user_ids: list[int]) -> None:
+        for telegram_user_id in telegram_user_ids:
+            user = await self._session.get(TelegramUser, telegram_user_id)
+            if user is None:
+                self._session.add(
+                    TelegramUser(
+                        telegram_user_id=telegram_user_id,
+                        username=None,
+                        full_name=None,
+                        is_admin=True,
+                        is_active=True,
+                        added_by_telegram_id=None,
+                    )
+                )
+            else:
+                user.is_admin = True
+                user.is_active = True
+        await self._session.flush()
+
+    async def list_all(self) -> list[TelegramUserRecord]:
+        statement = select(TelegramUser).order_by(
+            TelegramUser.is_admin.desc(), TelegramUser.telegram_user_id
+        )
+        users = (await self._session.scalars(statement)).all()
+        return [TelegramUserRecord.model_validate(user) for user in users]

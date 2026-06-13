@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -39,3 +40,23 @@ class OnlineFoodData(BaseModel):
     kcal_per_100g: Decimal | None
     confidence: Decimal
     aliases: list[str]
+
+
+class FoodRecord(FoodData):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class TelegramUserRecord(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    telegram_user_id: int
+    username: str | None
+    full_name: str | None
+    is_admin: bool
+    is_active: bool
+    added_by_telegram_id: int | None
+    created_at: datetime
+    updated_at: datetime
+    last_seen_at: datetime | None

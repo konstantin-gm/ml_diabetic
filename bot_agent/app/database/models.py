@@ -3,7 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, MetaData, Numeric, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    MetaData,
+    Numeric,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 NAMING_CONVENTION = {
@@ -57,3 +67,19 @@ class FoodAlias(Base):
     alias: Mapped[str] = mapped_column(String(200), unique=True)
 
     food: Mapped[Food] = relationship(back_populates="aliases")
+
+
+class TelegramUser(Base):
+    __tablename__ = "telegram_users"
+
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    username: Mapped[str | None] = mapped_column(String(64))
+    full_name: Mapped[str | None] = mapped_column(String(255))
+    is_admin: Mapped[bool] = mapped_column(default=False, server_default="false")
+    is_active: Mapped[bool] = mapped_column(default=True, server_default="true", index=True)
+    added_by_telegram_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
