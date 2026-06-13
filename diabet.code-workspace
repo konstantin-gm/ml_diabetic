@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"name": "ml_diabetic",
+			"path": "."
+		}
+	],
+	"settings": {}
+}

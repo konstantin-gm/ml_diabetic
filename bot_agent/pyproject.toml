@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "diabetes-food-bot"
+version = "0.1.0"
+description = "Telegram carbohydrate lookup assistant for type 1 diabetes"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiogram>=3.20,<4",
+    "alembic>=1.16,<2",
+    "asyncpg>=0.30,<1",
+    "openai>=2.0,<3",
+    "pydantic>=2.11,<3",
+    "pydantic-ai-slim[openai]>=1.0,<2",
+    "pydantic-settings>=2.9,<3",
+    "sqlalchemy[asyncio]>=2.0.40,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "aiosqlite>=0.21,<1",
+    "mypy>=1.15,<2",
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.26,<2",
+    "ruff>=0.11,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
