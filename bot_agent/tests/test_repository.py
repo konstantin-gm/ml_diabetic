@@ -42,3 +42,34 @@ async def test_food_is_found_by_normalized_alias(tmp_path) -> None:  # type: ign
 
 def test_normalizes_russian_yo_and_whitespace() -> None:
     assert normalize_food_name("  ТЁПЛАЯ   КАША ") == "теплая каша"
+
+
+async def test_user_carbs_are_saved_and_can_update_cached_food(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'user-foods.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as session:
+        repository = FoodRepository(session)
+        created = await repository.save_user_carbs("Мой хлеб", Decimal("42.00"))
+        await session.commit()
+
+    assert created.carbs_per_100g == Decimal("42.00")
+    assert created.source == "user_provided"
+
+    async with session_factory() as session:
+        repository = FoodRepository(session)
+        updated = await repository.save_user_carbs("  мой   хлеб ", Decimal("45.50"))
+        await session.commit()
+
+    assert updated.canonical_name == created.canonical_name
+    assert updated.carbs_per_100g == Decimal("45.50")
+    assert updated.source == "user_provided"
+
+    async with session_factory() as session:
+        found = await FoodRepository(session).find_by_name("МОЙ ХЛЕБ")
+
+    assert found is not None
+    assert found.carbs_per_100g == Decimal("45.50")
+    await engine.dispose()

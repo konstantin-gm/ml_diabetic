@@ -3,6 +3,15 @@
 Stage 1 Telegram assistant that answers Russian-language questions about food
 carbohydrates. It checks PostgreSQL first, uses OpenAI web search for missing
 foods, and stores the normalized result for later requests.
+Users can also provide carbohydrate values from a product label. The bot
+normalizes them to 100 grams and stores or updates the local food record.
+
+Examples:
+
+```text
+В моём хлебе 42 г углеводов на 100 г
+В 30 г батончика 18 г углеводов
+```
 
 The bot only calculates carbohydrates. It does not recommend insulin doses or
 provide medical advice.
@@ -16,6 +25,8 @@ docker compose up --build
 ```
 
 The bot container applies Alembic migrations before starting long polling.
+PostgreSQL is exposed on `localhost:5434` by default to avoid conflicts with a
+locally installed PostgreSQL. Override it with `POSTGRES_PORT` when needed.
 
 ## Local development
 
@@ -37,4 +48,3 @@ ruff check .
 mypy app
 pytest
 ```
-

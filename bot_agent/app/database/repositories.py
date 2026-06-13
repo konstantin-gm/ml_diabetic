@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import re
+from decimal import Decimal
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +23,39 @@ class FoodRepository:
         self._session = session
 
     async def find_by_name(self, name: str) -> FoodData | None:
+        food = await self._find_model_by_name(name)
+        return self._to_data(food) if food is not None else None
+
+    async def save_user_carbs(self, name: str, carbs_per_100g: Decimal) -> FoodData:
+        normalized = normalize_food_name(name)
+        if not normalized:
+            raise ValueError("food name cannot be empty")
+
+        food = await self._find_model_by_name(normalized)
+        if food is None:
+            digest = hashlib.sha256(normalized.encode()).hexdigest()[:24]
+            food = Food(
+                canonical_name=f"user_food_{digest}",
+                ru_name=name.strip(),
+                en_name=None,
+                carbs_per_100g=carbs_per_100g,
+                protein_per_100g=None,
+                fat_per_100g=None,
+                kcal_per_100g=None,
+                source="user_provided",
+                confidence=Decimal("1.00"),
+                aliases=[FoodAlias(alias=normalized)],
+            )
+            self._session.add(food)
+        else:
+            food.carbs_per_100g = carbs_per_100g
+            food.source = "user_provided"
+            food.confidence = Decimal("1.00")
+
+        await self._session.flush()
+        return self._to_data(food)
+
+    async def _find_model_by_name(self, name: str) -> Food | None:
         normalized = normalize_food_name(name)
         statement = (
             select(Food)
@@ -34,8 +69,8 @@ class FoodRepository:
             )
             .limit(1)
         )
-        food = await self._session.scalar(statement)
-        return self._to_data(food) if food is not None else None
+        food: Food | None = await self._session.scalar(statement)
+        return food
 
     async def save(self, data: FoodData) -> FoodData:
         existing = await self._session.scalar(

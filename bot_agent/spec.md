@@ -87,6 +87,25 @@ Answer:
 - save to database
 - answer user
 
+User-provided value:
+
+User:
+
+"В моём хлебе 42 г углеводов на 100 г"
+
+Expected flow:
+
+1. Parse:
+- food: мой хлеб
+- carbohydrates: 42
+- amount: 100 grams
+
+2. Normalize carbohydrates to 100 grams.
+
+3. Create or update the food in PostgreSQL with `source = user_provided`.
+
+4. Confirm the saved value. Future calculations must use this local value.
+
 
 ## Database
 
@@ -142,6 +161,8 @@ find_food(name)
 lookup_food_online(name)
 
 save_food(food)
+
+save_user_food(name, carbs_grams, amount_grams)
 
 calculate_carbs(food, amount)
 
