@@ -9,7 +9,13 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.agent.schemas import JournalEntryCreate, JournalEntryRecord, JournalEntryUpdate
-from app.agent.tools import FoodAgentDeps, delete_last_journal_entry
+from app.agent.tools import (
+    JOURNAL_ENTRY_NOT_FOUND_MESSAGE,
+    FoodAgentDeps,
+    add_journal_entry,
+    delete_last_journal_entry,
+    edit_journal_entry,
+)
 from app.database.models import Base, TelegramUser
 from app.database.repositories import JournalRepository
 from app.services.journal import (
@@ -91,6 +97,40 @@ async def test_naive_event_time_uses_configured_timezone(tmp_path) -> None:  # t
         await session.commit()
 
     assert entry.occurred_at.utcoffset() is not None
+    await engine.dispose()
+
+
+async def test_add_journal_tool_returns_time_in_users_timezone(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'tool-timezone.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    timezone = ZoneInfo("Europe/Moscow")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessions() as session:
+        session.add(TelegramUser(telegram_user_id=1001, is_admin=False, is_active=True))
+        await session.flush()
+        context = cast(
+            Any,
+            SimpleNamespace(
+                deps=FoodAgentDeps(
+                    session=session,
+                    online_lookup=cast(Any, object()),
+                    telegram_user_id=1001,
+                    journal_timezone=timezone,
+                    journal_xe_carbs_grams=Decimal("12"),
+                )
+            ),
+        )
+
+        entry = await add_journal_entry(
+            context,
+            occurred_at=datetime(2026, 6, 14, 9, 30, tzinfo=UTC),
+            blood_glucose_mmol_l=Decimal("5.8"),
+        )
+
+    assert entry.occurred_at == datetime(2026, 6, 14, 12, 30, tzinfo=timezone)
+    assert entry.created_at.tzinfo == timezone
     await engine.dispose()
 
 
@@ -275,6 +315,39 @@ async def test_update_at_changes_only_selected_users_explicit_fields(tmp_path) -
 
     assert other_entries[0].id == other.id
     assert other_entries[0].blood_glucose_mmol_l == Decimal("8.10")
+    await engine.dispose()
+
+
+async def test_edit_journal_tool_returns_message_when_entry_is_missing(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'missing-edit.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    timezone = ZoneInfo("Europe/Moscow")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessions() as session:
+        session.add(TelegramUser(telegram_user_id=1001, is_admin=False, is_active=True))
+        await session.flush()
+        context = cast(
+            Any,
+            SimpleNamespace(
+                deps=FoodAgentDeps(
+                    session=session,
+                    online_lookup=cast(Any, object()),
+                    telegram_user_id=1001,
+                    journal_timezone=timezone,
+                    journal_xe_carbs_grams=Decimal("12"),
+                )
+            ),
+        )
+
+        result = await edit_journal_entry(
+            context,
+            target_occurred_at=datetime(2026, 6, 14, 12, 30),
+            blood_glucose_mmol_l=Decimal("5.8"),
+        )
+
+    assert result == JOURNAL_ENTRY_NOT_FOUND_MESSAGE
     await engine.dispose()
 
 

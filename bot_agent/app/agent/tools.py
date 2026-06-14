@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, tzinfo
+from datetime import UTC, datetime, tzinfo
 from decimal import Decimal
 
 from pydantic_ai import RunContext
@@ -25,6 +25,8 @@ from app.services.carbs import (
 )
 from app.services.online_food import OnlineFoodLookup
 
+JOURNAL_ENTRY_NOT_FOUND_MESSAGE = "Отсутствует запись в данное время."
+
 
 @dataclass(slots=True)
 class FoodAgentDeps:
@@ -33,6 +35,23 @@ class FoodAgentDeps:
     telegram_user_id: int
     journal_timezone: tzinfo
     journal_xe_carbs_grams: Decimal
+
+
+def _journal_record_for_user(
+    record: JournalEntryRecord,
+    display_timezone: tzinfo,
+) -> JournalEntryRecord:
+    def localize(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(display_timezone)
+
+    return record.model_copy(
+        update={
+            "occurred_at": localize(record.occurred_at),
+            "created_at": localize(record.created_at),
+        }
+    )
 
 
 async def find_food(ctx: RunContext[FoodAgentDeps], name: str) -> FoodData | None:
@@ -100,11 +119,12 @@ async def add_journal_entry(
         physical_activity=physical_activity,
         blood_glucose_mmol_l=blood_glucose_mmol_l,
     )
-    return await JournalRepository(ctx.deps.session).add(
+    record = await JournalRepository(ctx.deps.session).add(
         ctx.deps.telegram_user_id,
         data,
         ctx.deps.journal_timezone,
     )
+    return _journal_record_for_user(record, ctx.deps.journal_timezone)
 
 
 async def edit_journal_entry(
@@ -143,12 +163,17 @@ async def edit_journal_entry(
         blood_glucose_mmol_l=blood_glucose_mmol_l,
     )
     try:
-        return await JournalRepository(ctx.deps.session).update_at(
+        result = await JournalRepository(ctx.deps.session).update_at(
             ctx.deps.telegram_user_id,
             target_occurred_at,
             data,
             ctx.deps.journal_timezone,
         )
+        if isinstance(result, JournalEntryRecord):
+            return _journal_record_for_user(result, ctx.deps.journal_timezone)
+        if result is None:
+            return JOURNAL_ENTRY_NOT_FOUND_MESSAGE
+        return result
     except AmbiguousJournalEntryError as error:
         return str(error)
 
@@ -161,7 +186,12 @@ async def delete_last_journal_entry(
     Use this when the user explicitly asks to delete their last or most recent
     journal entry. No date or time is required. Return null when the journal is empty.
     """
-    return await JournalRepository(ctx.deps.session).delete_last(ctx.deps.telegram_user_id)
+    record = await JournalRepository(ctx.deps.session).delete_last(
+        ctx.deps.telegram_user_id
+    )
+    if record is None:
+        return None
+    return _journal_record_for_user(record, ctx.deps.journal_timezone)
 
 
 def calculate_carbs(
