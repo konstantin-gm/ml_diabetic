@@ -20,7 +20,14 @@ Telegram commands:
 ```text
 /foods       Show all saved foods in chat
 /export_csv  Download the complete food database as CSV
+/import_foods_csv  Add or update foods from CSV
 ```
+
+Attach a CSV to `/import_foods_csv`, or send a `.csv` document directly. The
+format produced by `/export_csv` can be imported back. Required columns are
+`canonical_name`, `ru_name`, and `carbs_per_100g`; nutrition fields, source,
+confidence, and semicolon-separated aliases are optional. Existing rows are
+updated by `canonical_name`.
 
 Access is restricted to users stored in PostgreSQL. Set your Telegram numeric
 ID as the initial administrator before the first start:

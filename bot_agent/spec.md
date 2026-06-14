@@ -111,6 +111,9 @@ Database access in Telegram:
 
 - `/foods` lists all saved foods and carbohydrate values in the chat.
 - `/export_csv` sends the complete food database as a UTF-8 CSV document.
+- `/import_foods_csv` imports the exported CSV format and upserts products by
+  `canonical_name`. Required columns are `canonical_name`, `ru_name`, and
+  `carbs_per_100g`; the operation is transactional.
 
 Access control:
 

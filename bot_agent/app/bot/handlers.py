@@ -19,6 +19,7 @@ from app.database.repositories import (
     TelegramUserRepository,
 )
 from app.services.food_export import build_foods_csv, format_food_messages
+from app.services.food_import import MAX_IMPORT_BYTES, FoodImportError, parse_foods_csv
 from app.services.journal import format_journal_messages, parse_journal_limit
 from app.services.journal_export import build_journal_csv
 from app.services.journal_import import (
@@ -51,6 +52,7 @@ def create_router(
             "Команды:\n"
             "/foods — показать базу продуктов\n"
             "/export_csv — скачать базу в CSV\n\n"
+            "/import_foods_csv — загрузить продукты из CSV\n\n"
             "Журнал:\n"
             "/log данные — добавить запись\n"
             "/journal [количество] — показать свои записи\n"
@@ -131,6 +133,50 @@ def create_router(
         await message.answer_document(
             document,
             caption=f"Экспорт базы продуктов: {len(foods)} записей.",
+        )
+
+    async def import_foods_document(message: Message) -> None:
+        if message.document is None or message.bot is None:
+            return
+        try:
+            if message.document.file_size and message.document.file_size > MAX_IMPORT_BYTES:
+                raise FoodImportError("Размер CSV превышает 10 МБ.")
+            downloaded = await message.bot.download(message.document)
+            if downloaded is None:
+                raise FoodImportError("Telegram не вернул содержимое файла.")
+            parsed = parse_foods_csv(downloaded.read())
+            created = 0
+            updated = 0
+            async with session_factory() as session:
+                repository = FoodRepository(session)
+                for food in parsed.foods:
+                    if await repository.upsert_import(food):
+                        created += 1
+                    else:
+                        updated += 1
+                await session.commit()
+        except FoodImportError as error:
+            await message.answer(f"Не удалось импортировать продукты: {error}")
+            return
+        except Exception:
+            logger.exception("Failed to import foods CSV")
+            await message.answer("Не удалось импортировать продукты из-за внутренней ошибки.")
+            return
+
+        await message.answer(
+            f"Импорт продуктов завершён: добавлено {created}, обновлено {updated}."
+        )
+
+    @router.message(Command("import_foods_csv"), F.document)
+    async def import_foods_csv_document(message: Message) -> None:
+        await import_foods_document(message)
+
+    @router.message(Command("import_foods_csv"))
+    async def import_foods_csv_help(message: Message) -> None:
+        await message.answer(
+            "Прикрепите CSV к команде /import_foods_csv. Поддерживается формат файла, "
+            "созданного командой /export_csv. Обязательные колонки: canonical_name, "
+            "ru_name, carbs_per_100g."
         )
 
     async def run_agent(message: Message, prompt: str) -> None:
@@ -249,6 +295,10 @@ def create_router(
 
     @router.message(F.document)
     async def import_document_without_command(message: Message) -> None:
+        filename = (message.document.file_name or "").lower() if message.document else ""
+        if filename.endswith(".csv"):
+            await import_foods_document(message)
+            return
         caption = message.caption or ""
         year_value = caption if caption.lstrip().startswith("/import") else None
         await import_document(message, year_value)

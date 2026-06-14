@@ -121,3 +121,54 @@ async def test_user_carbs_are_saved_and_can_update_cached_food(tmp_path) -> None
     assert foods[0].id > 0
     assert foods[0].created_at is not None
     await engine.dispose()
+
+
+async def test_csv_import_creates_and_updates_food(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'food-import.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    original = FoodData(
+        canonical_name="apple_raw",
+        ru_name="яблоко",
+        en_name="raw apple",
+        carbs_per_100g=Decimal("13.8"),
+        source="https://example.com/apple",
+        confidence=Decimal("0.7"),
+        aliases=["яблоко свежее"],
+    )
+    updated = original.model_copy(
+        update={
+            "ru_name": "яблоко сырое",
+            "protein_per_100g": Decimal("0.3"),
+            "fat_per_100g": Decimal("0.2"),
+            "kcal_per_100g": Decimal("52"),
+            "glycemic_index": Decimal("36"),
+            "source": "csv_import",
+            "confidence": Decimal("1"),
+            "aliases": ["яблоко без кожуры"],
+        }
+    )
+    async with sessions() as session:
+        repository = FoodRepository(session)
+        created = await repository.upsert_import(original)
+        changed = await repository.upsert_import(updated)
+        await session.commit()
+
+    async with sessions() as session:
+        found = await FoodRepository(session).find_by_name("яблоко без кожуры")
+        foods = await FoodRepository(session).list_all()
+
+    assert created is True
+    assert changed is False
+    assert found is not None
+    assert found.ru_name == "яблоко сырое"
+    assert found.protein_per_100g == Decimal("0.30")
+    assert found.fat_per_100g == Decimal("0.20")
+    assert found.kcal_per_100g == Decimal("52.00")
+    assert found.glycemic_index == Decimal("36.00")
+    assert found.source == "https://example.com/apple"
+    assert found.confidence == Decimal("0.70")
+    assert len(foods) == 1
+    await engine.dispose()

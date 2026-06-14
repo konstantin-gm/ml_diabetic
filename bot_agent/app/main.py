@@ -55,6 +55,7 @@ async def main() -> None:
                 BotCommand(command="start", description="Открыть справку"),
                 BotCommand(command="foods", description="Показать базу продуктов"),
                 BotCommand(command="export_csv", description="Скачать базу в CSV"),
+                BotCommand(command="import_foods_csv", description="Загрузить продукты из CSV"),
                 BotCommand(command="log", description="Добавить запись в журнал"),
                 BotCommand(command="journal", description="Показать мой журнал"),
                 BotCommand(command="export_journal_csv", description="Скачать журнал в CSV"),

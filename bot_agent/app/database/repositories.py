@@ -129,6 +129,56 @@ class FoodRepository:
         await self._session.flush()
         return self._to_data(food)
 
+    async def upsert_import(self, data: FoodData) -> bool:
+        food = await self._session.scalar(
+            select(Food)
+            .options(selectinload(Food.aliases))
+            .where(Food.canonical_name == data.canonical_name)
+        )
+        created = food is None
+        if food is None:
+            food = Food(canonical_name=data.canonical_name, aliases=[])
+            self._session.add(food)
+
+        food.ru_name = data.ru_name.strip()
+        food.carbs_per_100g = data.carbs_per_100g
+        if created or data.en_name is not None:
+            food.en_name = data.en_name.strip() if data.en_name else None
+        if created or data.protein_per_100g is not None:
+            food.protein_per_100g = data.protein_per_100g
+        if created or data.fat_per_100g is not None:
+            food.fat_per_100g = data.fat_per_100g
+        if created or data.kcal_per_100g is not None:
+            food.kcal_per_100g = data.kcal_per_100g
+        if created or data.glycemic_index is not None:
+            food.glycemic_index = data.glycemic_index
+        has_explicit_metadata = data.source != "csv_import"
+        if created or has_explicit_metadata:
+            food.source = data.source
+        if created or has_explicit_metadata or data.confidence != Decimal("1"):
+            food.confidence = data.confidence
+        await self._session.flush()
+
+        desired_aliases = {data.ru_name, data.canonical_name.replace("_", " "), *data.aliases}
+        if data.en_name:
+            desired_aliases.add(data.en_name)
+        normalized_aliases = {
+            normalize_food_name(alias) for alias in desired_aliases if alias.strip()
+        }
+        current_aliases = {alias.alias for alias in food.aliases}
+        if normalized_aliases - current_aliases:
+            occupied = set(
+                await self._session.scalars(
+                    select(FoodAlias.alias).where(FoodAlias.alias.in_(normalized_aliases))
+                )
+            )
+            food.aliases.extend(
+                FoodAlias(alias=alias)
+                for alias in sorted(normalized_aliases - current_aliases - occupied)
+            )
+            await self._session.flush()
+        return created
+
     @staticmethod
     def _to_data(food: Food) -> FoodData:
         return FoodData(
