@@ -133,6 +133,12 @@ Personal journal:
 - Users add entries with `/log <data>` or a natural-language request such as
   "Запиши сахар 6.4 ммоль/л, короткий инсулин 3 ед., прогулка 30 минут".
 - `/journal [limit]` shows only the current user's recent entries.
+- `/stats [days]` shows average, median, minimum, and maximum carbohydrates and
+  short insulin values from the current user's entries during the last N days.
+  The default period is 7 days. Statistics use whole local calendar days from
+  00:00 to 24:00 in `JOURNAL_TIMEZONE`. The current incomplete day is excluded,
+  so the command uses the previous N completed days. Missing values are excluded
+  per metric.
 - `/delete_last` or an equivalent natural-language request removes only the current
   user's most recent journal entry without requiring a date and time.
 - `/edit DD.MM.YYYY HH:MM changes` updates the current user's entry at that local

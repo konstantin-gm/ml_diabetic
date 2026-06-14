@@ -12,7 +12,14 @@ from app.agent.schemas import JournalEntryCreate, JournalEntryRecord, JournalEnt
 from app.agent.tools import FoodAgentDeps, delete_last_journal_entry
 from app.database.models import Base, TelegramUser
 from app.database.repositories import JournalRepository
-from app.services.journal import format_journal_messages, parse_journal_limit
+from app.services.journal import (
+    calculate_journal_statistics,
+    format_journal_messages,
+    format_journal_statistics,
+    parse_journal_limit,
+    parse_statistics_days,
+    statistics_period_bounds,
+)
 
 
 async def test_journal_entries_are_isolated_by_user(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -84,6 +91,47 @@ async def test_naive_event_time_uses_configured_timezone(tmp_path) -> None:  # t
         await session.commit()
 
     assert entry.occurred_at.utcoffset() is not None
+    await engine.dispose()
+
+
+async def test_list_between_filters_period_and_user(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'journal-period.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    timezone = ZoneInfo("Europe/Moscow")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessions() as session:
+        session.add_all(
+            [
+                TelegramUser(telegram_user_id=1001, is_admin=False, is_active=True),
+                TelegramUser(telegram_user_id=2002, is_admin=False, is_active=True),
+            ]
+        )
+        await session.flush()
+        repository = JournalRepository(session)
+        for user_id, occurred_at, food in (
+            (1001, datetime(2026, 6, 1, tzinfo=UTC), "старая"),
+            (1001, datetime(2026, 6, 7, tzinfo=UTC), "на нижней границе"),
+            (1001, datetime(2026, 6, 10, tzinfo=UTC), "новая"),
+            (1001, datetime(2026, 6, 11, tzinfo=UTC), "на верхней границе"),
+            (2002, datetime(2026, 6, 10, tzinfo=UTC), "чужая"),
+        ):
+            await repository.add(
+                user_id,
+                JournalEntryCreate(occurred_at=occurred_at, food=food),
+                timezone,
+            )
+        await session.commit()
+
+    async with sessions() as session:
+        entries = await JournalRepository(session).list_between(
+            1001,
+            datetime(2026, 6, 7, tzinfo=UTC),
+            datetime(2026, 6, 11, tzinfo=UTC),
+        )
+
+    assert [entry.food for entry in entries] == ["на нижней границе", "новая"]
     await engine.dispose()
 
 
@@ -295,7 +343,84 @@ def test_formats_journal_and_parses_limit() -> None:
     assert "продолжительность 30 мин." in messages[0]
 
 
+def test_calculates_and_formats_journal_statistics() -> None:
+    entries = [
+        _journal_record(1, carbohydrates="10", short_insulin="2"),
+        _journal_record(2, carbohydrates="20", short_insulin=None),
+        _journal_record(3, carbohydrates="40", short_insulin="4"),
+        _journal_record(4, carbohydrates=None, short_insulin=None),
+    ]
+
+    statistics = calculate_journal_statistics(entries)
+    message = format_journal_statistics(statistics, 14)
+
+    assert statistics.entries_count == 4
+    assert statistics.carbohydrates is not None
+    assert statistics.carbohydrates.count == 3
+    assert statistics.carbohydrates.average == Decimal("23.33")
+    assert statistics.carbohydrates.median == Decimal("20.00")
+    assert statistics.carbohydrates.minimum == Decimal("10")
+    assert statistics.carbohydrates.maximum == Decimal("40")
+    assert statistics.short_insulin is not None
+    assert statistics.short_insulin.average == Decimal("3.00")
+    assert statistics.short_insulin.median == Decimal("3.00")
+    assert "Статистика журнала за последние 14 дн. Записей: 4." in message
+    assert "Углеводы (3 знач.)" in message
+    assert "Короткий инсулин (2 знач.)" in message
+
+
+def test_statistics_handles_missing_values_and_parses_days() -> None:
+    statistics = calculate_journal_statistics([_journal_record(1)])
+
+    assert parse_statistics_days(None) == 7
+    assert parse_statistics_days("30") == 30
+    assert statistics.carbohydrates is None
+    assert statistics.short_insulin is None
+    message = format_journal_statistics(statistics, 7)
+    assert "Углеводы: нет данных." in message
+    assert "Короткий инсулин: нет данных." in message
+
+
+def test_statistics_period_uses_previous_completed_local_calendar_days() -> None:
+    timezone = ZoneInfo("Europe/Moscow")
+
+    period_start, period_end = statistics_period_bounds(
+        datetime(2026, 6, 14, 18, 45, tzinfo=UTC),
+        3,
+        timezone,
+    )
+
+    assert period_start == datetime(2026, 6, 11, 0, 0, tzinfo=timezone)
+    assert period_end == datetime(2026, 6, 14, 0, 0, tzinfo=timezone)
+
+
 @pytest.mark.parametrize("value", ["0", "101", "abc"])
 def test_rejects_invalid_journal_limit(value: str) -> None:
     with pytest.raises(ValueError):
         parse_journal_limit(value)
+
+
+@pytest.mark.parametrize("value", ["0", "3651", "abc", "1.5"])
+def test_rejects_invalid_statistics_days(value: str) -> None:
+    with pytest.raises(ValueError):
+        parse_statistics_days(value)
+
+
+def _journal_record(
+    entry_id: int,
+    carbohydrates: str | None = None,
+    short_insulin: str | None = None,
+) -> JournalEntryRecord:
+    return JournalEntryRecord(
+        id=entry_id,
+        telegram_user_id=1001,
+        occurred_at=datetime(2026, 6, 14, entry_id, tzinfo=UTC),
+        duration_minutes=None,
+        short_insulin_units=Decimal(short_insulin) if short_insulin is not None else None,
+        long_insulin_units=None,
+        food="запись без статистических показателей",
+        carbohydrates_grams=Decimal(carbohydrates) if carbohydrates is not None else None,
+        physical_activity=None,
+        blood_glucose_mmol_l=None,
+        created_at=datetime(2026, 6, 14, entry_id, tzinfo=UTC),
+    )

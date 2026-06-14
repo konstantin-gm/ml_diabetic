@@ -20,7 +20,14 @@ from app.database.repositories import (
 )
 from app.services.food_export import build_foods_csv, format_food_messages
 from app.services.food_import import MAX_IMPORT_BYTES, FoodImportError, parse_foods_csv
-from app.services.journal import format_journal_messages, parse_journal_limit
+from app.services.journal import (
+    calculate_journal_statistics,
+    format_journal_messages,
+    format_journal_statistics,
+    parse_journal_limit,
+    parse_statistics_days,
+    statistics_period_bounds,
+)
 from app.services.journal_export import build_journal_csv
 from app.services.journal_import import (
     JournalImportError,
@@ -56,6 +63,7 @@ def create_router(
             "Журнал:\n"
             "/log данные — добавить запись\n"
             "/journal [количество] — показать свои записи\n"
+            "/stats [дни] — статистика углеводов и короткого инсулина\n"
             "/delete_last — удалить последнюю запись\n"
             "/edit дата время изменения — исправить запись\n"
             "/export_journal_csv — скачать свой журнал в CSV\n"
@@ -246,6 +254,30 @@ def create_router(
             entries = await JournalRepository(session).list_recent(message.from_user.id, limit)
         for text in format_journal_messages(entries, journal_timezone):
             await message.answer(text)
+
+    @router.message(Command("stats"))
+    async def journal_statistics(message: Message, command: CommandObject) -> None:
+        if message.from_user is None:
+            return
+        try:
+            days = parse_statistics_days(command.args)
+        except ValueError as error:
+            await message.answer(str(error))
+            return
+
+        occurred_at_from, occurred_at_to = statistics_period_bounds(
+            datetime.now(UTC),
+            days,
+            journal_timezone,
+        )
+        async with session_factory() as session:
+            entries = await JournalRepository(session).list_between(
+                message.from_user.id,
+                occurred_at_from,
+                occurred_at_to,
+            )
+        statistics = calculate_journal_statistics(entries)
+        await message.answer(format_journal_statistics(statistics, days))
 
     @router.message(Command("delete_last"))
     async def delete_last_journal_entry(message: Message) -> None:

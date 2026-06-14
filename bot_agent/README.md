@@ -50,6 +50,7 @@ Each authorized user has a private journal:
 /log сахар 6.4 ммоль/л, короткий инсулин 3 ед., гречка, углеводы 4 ХЕ
 /journal
 /journal 50
+/stats 14
 /delete_last
 /edit 14.06.2026 12:30 сахар 5.8 ммоль/л, углеводы 40 г
 /export_journal_csv
@@ -61,6 +62,12 @@ food, carbohydrate grams, physical activity, and blood glucose in mmol/L.
 Users may enter carbohydrates in grams or bread units (ХЕ). The database stores
 grams only; `JOURNAL_XE_CARBS_GRAMS` controls the conversion and defaults to 12.
 Insulin values are stored as reported; the bot does not calculate or recommend doses.
+`/stats [days]` reports average, median, minimum, and maximum carbohydrates and
+short insulin values for the current user's entries during the last N days. The
+default period is 7 days. The interval consists of calendar days from 00:00 to
+24:00 in `JOURNAL_TIMEZONE`. The current incomplete day is excluded, so the
+command uses the previous N completed days. Missing values are excluded from
+each metric.
 `/delete_last` or the phrase `Удали последнюю запись в журнале` removes only the
 current user's most recent journal entry without requiring a timestamp.
 `/edit` finds the current user's entry by local date and time to the minute and

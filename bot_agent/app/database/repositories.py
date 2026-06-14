@@ -363,6 +363,28 @@ class JournalRepository:
         entries = (await self._session.scalars(statement)).all()
         return [JournalEntryRecord.model_validate(entry) for entry in entries]
 
+    async def list_between(
+        self,
+        telegram_user_id: int,
+        occurred_at_from: datetime,
+        occurred_at_to: datetime,
+    ) -> list[JournalEntryRecord]:
+        if occurred_at_from.tzinfo is None or occurred_at_to.tzinfo is None:
+            raise ValueError("period boundaries must include timezone")
+        if occurred_at_from >= occurred_at_to:
+            raise ValueError("period start must be earlier than period end")
+        statement = (
+            select(JournalEntry)
+            .where(
+                JournalEntry.telegram_user_id == telegram_user_id,
+                JournalEntry.occurred_at >= occurred_at_from.astimezone(UTC),
+                JournalEntry.occurred_at < occurred_at_to.astimezone(UTC),
+            )
+            .order_by(JournalEntry.occurred_at, JournalEntry.id)
+        )
+        entries = (await self._session.scalars(statement)).all()
+        return [JournalEntryRecord.model_validate(entry) for entry in entries]
+
     async def delete_last(self, telegram_user_id: int) -> JournalEntryRecord | None:
         statement = (
             select(JournalEntry)

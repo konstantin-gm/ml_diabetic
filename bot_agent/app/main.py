@@ -58,6 +58,7 @@ async def main() -> None:
                 BotCommand(command="import_foods_csv", description="Загрузить продукты из CSV"),
                 BotCommand(command="log", description="Добавить запись в журнал"),
                 BotCommand(command="journal", description="Показать мой журнал"),
+                BotCommand(command="stats", description="Статистика журнала за период"),
                 BotCommand(command="delete_last", description="Удалить последнюю запись"),
                 BotCommand(command="edit", description="Исправить запись по дате и времени"),
                 BotCommand(command="export_journal_csv", description="Скачать журнал в CSV"),
