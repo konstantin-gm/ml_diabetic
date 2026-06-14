@@ -32,7 +32,7 @@ async def find_food(ctx: RunContext[FoodAgentDeps], name: str) -> FoodData | Non
 
 
 async def lookup_food_online(ctx: RunContext[FoodAgentDeps], name: str) -> FoodData:
-    """Search reliable web sources for nutrition data when local food data is missing."""
+    """Search reliable web sources for carbs, protein, fat, kcal, and glycemic index."""
     return await ctx.deps.online_lookup.lookup(name)
 
 

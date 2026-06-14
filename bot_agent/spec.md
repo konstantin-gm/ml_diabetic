@@ -153,6 +153,7 @@ carbs_per_100g
 protein_per_100g
 fat_per_100g
 kcal_per_100g
+glycemic_index
 
 source
 confidence
@@ -231,6 +232,10 @@ calculate_carbs(food, amount)
 Agent must prefer:
 1. Local database
 2. Online lookup only if missing
+
+Online lookup stores carbohydrates, protein, fat, kcal per 100 grams, and a
+measured glycemic index when reliable data exists for the exact preparation.
+It must not infer glycemic index from nutrients, glycemic load, or similar foods.
 
 
 ## Safety rules

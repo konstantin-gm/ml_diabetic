@@ -17,6 +17,7 @@ class FoodData(BaseModel):
     protein_per_100g: Decimal | None = Field(default=None, ge=0, le=100)
     fat_per_100g: Decimal | None = Field(default=None, ge=0, le=100)
     kcal_per_100g: Decimal | None = Field(default=None, ge=0)
+    glycemic_index: Decimal | None = Field(default=None, ge=0, le=100)
     source: str = Field(min_length=1)
     confidence: Decimal = Field(ge=0, le=1)
     aliases: list[str] = Field(default_factory=list)
@@ -35,9 +36,10 @@ class OnlineFoodData(BaseModel):
     ru_name: str
     en_name: str | None
     carbs_per_100g: Decimal
-    protein_per_100g: Decimal | None
-    fat_per_100g: Decimal | None
-    kcal_per_100g: Decimal | None
+    protein_per_100g: Decimal = Field(ge=0, le=100)
+    fat_per_100g: Decimal = Field(ge=0, le=100)
+    kcal_per_100g: Decimal = Field(ge=0)
+    glycemic_index: Decimal | None = Field(ge=0, le=100)
     confidence: Decimal
     aliases: list[str]
 

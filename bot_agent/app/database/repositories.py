@@ -55,6 +55,7 @@ class FoodRepository:
                 protein_per_100g=None,
                 fat_per_100g=None,
                 kcal_per_100g=None,
+                glycemic_index=None,
                 source="user_provided",
                 confidence=Decimal("1.00"),
                 aliases=[FoodAlias(alias=normalized)],
@@ -92,6 +93,17 @@ class FoodRepository:
             .where(Food.canonical_name == data.canonical_name)
         )
         if existing is not None:
+            if existing.source != "user_provided":
+                existing.ru_name = data.ru_name.strip()
+                existing.en_name = data.en_name.strip() if data.en_name else None
+                existing.carbs_per_100g = data.carbs_per_100g
+                existing.protein_per_100g = data.protein_per_100g
+                existing.fat_per_100g = data.fat_per_100g
+                existing.kcal_per_100g = data.kcal_per_100g
+                existing.glycemic_index = data.glycemic_index
+                existing.source = data.source
+                existing.confidence = data.confidence
+                await self._session.flush()
             return self._to_data(existing)
 
         food = Food(
@@ -102,6 +114,7 @@ class FoodRepository:
             protein_per_100g=data.protein_per_100g,
             fat_per_100g=data.fat_per_100g,
             kcal_per_100g=data.kcal_per_100g,
+            glycemic_index=data.glycemic_index,
             source=data.source,
             confidence=data.confidence,
         )
@@ -126,6 +139,7 @@ class FoodRepository:
             protein_per_100g=food.protein_per_100g,
             fat_per_100g=food.fat_per_100g,
             kcal_per_100g=food.kcal_per_100g,
+            glycemic_index=food.glycemic_index,
             source=food.source,
             confidence=food.confidence,
             aliases=[alias.alias for alias in food.aliases],
@@ -142,6 +156,7 @@ class FoodRepository:
             protein_per_100g=food.protein_per_100g,
             fat_per_100g=food.fat_per_100g,
             kcal_per_100g=food.kcal_per_100g,
+            glycemic_index=food.glycemic_index,
             source=food.source,
             confidence=food.confidence,
             aliases=[alias.alias for alias in food.aliases],

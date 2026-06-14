@@ -24,6 +24,7 @@ async def test_food_is_found_by_normalized_alias(tmp_path) -> None:  # type: ign
                 protein_per_100g=Decimal("3.6"),
                 fat_per_100g=Decimal("0.6"),
                 kcal_per_100g=Decimal("92"),
+                glycemic_index=Decimal("49"),
                 source="https://example.com/buckwheat",
                 confidence=Decimal("0.9"),
                 aliases=["греча", "гречневая каша"],
@@ -37,6 +38,49 @@ async def test_food_is_found_by_normalized_alias(tmp_path) -> None:  # type: ign
     assert found is not None
     assert found.canonical_name == "buckwheat_cooked"
     assert found.carbs_per_100g == Decimal("19.90")
+    assert found.protein_per_100g == Decimal("3.60")
+    assert found.fat_per_100g == Decimal("0.60")
+    assert found.kcal_per_100g == Decimal("92.00")
+    assert found.glycemic_index == Decimal("49.00")
+    await engine.dispose()
+
+
+async def test_online_food_can_be_enriched_with_missing_nutrients(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'enrichment.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    base = FoodData(
+        canonical_name="apple_raw",
+        ru_name="яблоко",
+        en_name="raw apple",
+        carbs_per_100g=Decimal("13.8"),
+        source="https://example.com/old",
+        confidence=Decimal("0.7"),
+        aliases=["яблоко свежее"],
+    )
+    enriched = base.model_copy(
+        update={
+            "protein_per_100g": Decimal("0.3"),
+            "fat_per_100g": Decimal("0.2"),
+            "kcal_per_100g": Decimal("52"),
+            "glycemic_index": Decimal("36"),
+            "source": "https://example.com/new",
+            "confidence": Decimal("0.9"),
+        }
+    )
+    async with sessions() as session:
+        repository = FoodRepository(session)
+        await repository.save(base)
+        updated = await repository.save(enriched)
+        await session.commit()
+
+    assert updated.protein_per_100g == Decimal("0.3")
+    assert updated.fat_per_100g == Decimal("0.2")
+    assert updated.kcal_per_100g == Decimal("52")
+    assert updated.glycemic_index == Decimal("36")
+    assert updated.source == "https://example.com/new"
     await engine.dispose()
 
 

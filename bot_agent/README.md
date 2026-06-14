@@ -5,6 +5,8 @@ carbohydrates. It checks PostgreSQL first, uses OpenAI web search for missing
 foods, and stores the normalized result for later requests.
 Users can also provide carbohydrate values from a product label. The bot
 normalizes them to 100 grams and stores or updates the local food record.
+Online food records include carbohydrates, protein, fat, kcal per 100 grams,
+and a measured glycemic index when a reliable value exists for the exact food.
 
 Examples:
 

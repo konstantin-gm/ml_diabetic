@@ -28,11 +28,16 @@ class OnlineFoodLookup:
                     "role": "system",
                     "content": (
                         "Find reliable nutrition data for the exact food and preparation state. "
-                        "Use web search. Return nutrients per 100 grams of edible product. "
+                        "Use web search. Return carbohydrates, protein, fat, and kcal per 100 "
+                        "grams of edible product, and search separately for its glycemic index. "
                         "Prefer government, university, manufacturer, or established nutrition "
                         "databases. canonical_name must be lowercase snake_case in English. "
-                        "confidence is 0 to 1. Include common Russian aliases. If the food is "
-                        "ambiguous, choose the interpretation explicitly named by the user."
+                        "Glycemic index must be between 0 and 100 and must match the exact food "
+                        "and preparation state. Do not calculate or infer glycemic index from "
+                        "carbohydrates, glycemic load, or similar foods; return null when no "
+                        "reliable measured value is available. confidence is 0 to 1. Include "
+                        "common Russian aliases. If the food is ambiguous, choose the "
+                        "interpretation explicitly named by the user."
                     ),
                 },
                 {"role": "user", "content": f"Food requested in Russian: {name}"},

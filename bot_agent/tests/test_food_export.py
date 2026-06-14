@@ -18,6 +18,7 @@ def _food(index: int, name: str = "Хлеб") -> FoodRecord:
         protein_per_100g=Decimal("8.10"),
         fat_per_100g=Decimal("2.00"),
         kcal_per_100g=Decimal("230"),
+        glycemic_index=Decimal("55"),
         source="user_provided",
         confidence=Decimal("1.00"),
         aliases=["хлеб", "мой хлеб"],
@@ -35,7 +36,11 @@ def test_formats_food_list_and_respects_message_limit() -> None:
     assert len(messages) > 1
     assert all(len(message) <= 180 for message in messages)
     assert "Продукты в базе: 7" in messages[0]
-    assert "42.5 г углеводов/100 г" in messages[0]
+    assert "У 42.5 г" in messages[0]
+    assert "Б 8.1 г" in messages[0]
+    assert "Ж 2 г" in messages[0]
+    assert "230 ккал" in messages[0]
+    assert "ГИ 55" in messages[0]
 
 
 def test_builds_excel_friendly_utf8_csv() -> None:
@@ -45,6 +50,10 @@ def test_builds_excel_friendly_utf8_csv() -> None:
     assert payload.startswith(b"\xef\xbb\xbf")
     assert rows[0]["ru_name"] == "Хлеб"
     assert rows[0]["carbs_per_100g"] == "42.5"
+    assert rows[0]["protein_per_100g"] == "8.1"
+    assert rows[0]["fat_per_100g"] == "2"
+    assert rows[0]["kcal_per_100g"] == "230"
+    assert rows[0]["glycemic_index"] == "55"
     assert rows[0]["aliases"] == "хлеб;мой хлеб"
 
 

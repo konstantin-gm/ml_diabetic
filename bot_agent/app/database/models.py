@@ -33,6 +33,10 @@ class Food(Base):
     __tablename__ = "foods"
     __table_args__ = (
         CheckConstraint("carbs_per_100g >= 0", name="carbs_nonnegative"),
+        CheckConstraint(
+            "glycemic_index IS NULL OR (glycemic_index >= 0 AND glycemic_index <= 100)",
+            name="glycemic_index_range",
+        ),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence"),
     )
 
@@ -45,6 +49,7 @@ class Food(Base):
     protein_per_100g: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
     fat_per_100g: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
     kcal_per_100g: Mapped[Decimal | None] = mapped_column(Numeric(7, 2))
+    glycemic_index: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
 
     source: Mapped[str] = mapped_column(Text)
     confidence: Mapped[Decimal] = mapped_column(Numeric(3, 2))

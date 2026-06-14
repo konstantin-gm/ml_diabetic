@@ -17,6 +17,7 @@ CSV_COLUMNS = (
     "protein_per_100g",
     "fat_per_100g",
     "kcal_per_100g",
+    "glycemic_index",
     "source",
     "confidence",
     "aliases",
@@ -32,11 +33,7 @@ def format_food_messages(
         return ["База продуктов пока пуста."]
 
     header = f"Продукты в базе: {len(foods)}\n"
-    lines = [
-        f"{index}. {food.ru_name} — {_decimal(food.carbs_per_100g)} г углеводов/100 г"
-        f" ({_source_label(food.source)})"
-        for index, food in enumerate(foods, start=1)
-    ]
+    lines = [_format_food_line(index, food) for index, food in enumerate(foods, start=1)]
     return _chunk_lines(header, lines, max_length)
 
 
@@ -55,6 +52,7 @@ def build_foods_csv(foods: Sequence[FoodRecord]) -> bytes:
                 "protein_per_100g": _optional_decimal(food.protein_per_100g),
                 "fat_per_100g": _optional_decimal(food.fat_per_100g),
                 "kcal_per_100g": _optional_decimal(food.kcal_per_100g),
+                "glycemic_index": _optional_decimal(food.glycemic_index),
                 "source": _csv_text(food.source),
                 "confidence": _decimal(food.confidence),
                 "aliases": _csv_text(";".join(food.aliases)),
@@ -92,6 +90,22 @@ def _optional_decimal(value: Decimal | None) -> str:
 
 def _source_label(source: str) -> str:
     return "пользователь" if source == "user_provided" else "онлайн"
+
+
+def _format_food_line(index: int, food: FoodRecord) -> str:
+    nutrients = [f"У {_decimal(food.carbs_per_100g)} г"]
+    if food.protein_per_100g is not None:
+        nutrients.append(f"Б {_decimal(food.protein_per_100g)} г")
+    if food.fat_per_100g is not None:
+        nutrients.append(f"Ж {_decimal(food.fat_per_100g)} г")
+    if food.kcal_per_100g is not None:
+        nutrients.append(f"{_decimal(food.kcal_per_100g)} ккал")
+    if food.glycemic_index is not None:
+        nutrients.append(f"ГИ {_decimal(food.glycemic_index)}")
+    return (
+        f"{index}. {food.ru_name} — {', '.join(nutrients)} на 100 г "
+        f"({_source_label(food.source)})"
+    )
 
 
 def _csv_text(value: str) -> str:
