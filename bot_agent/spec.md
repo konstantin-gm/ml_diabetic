@@ -128,6 +128,10 @@ Personal journal:
 - Users add entries with `/log <data>` or a natural-language request such as
   "Запиши сахар 6.4 ммоль/л, короткий инсулин 3 ед., прогулка 30 минут".
 - `/journal [limit]` shows only the current user's recent entries.
+- `/import [year]` imports Hematonix `.xls/.xlsx` glucose readings and MelStudio
+  `.txt` diary rows into the current user's journal.
+- MelStudio dates without a year use the command year or the current year.
+- Re-importing identical entries does not create duplicates.
 - The bot stores insulin values but never calculates or recommends insulin doses.
 
 

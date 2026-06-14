@@ -19,6 +19,11 @@ from app.database.repositories import (
 )
 from app.services.food_export import build_foods_csv, format_food_messages
 from app.services.journal import format_journal_messages, parse_journal_limit
+from app.services.journal_import import (
+    JournalImportError,
+    parse_import_year,
+    parse_journal_file,
+)
 from app.services.online_food import OnlineFoodLookup
 from app.services.user_access import format_user_messages, parse_add_user_args
 
@@ -45,6 +50,7 @@ def create_router(
             "Журнал:\n"
             "/log данные — добавить запись\n"
             "/journal [количество] — показать свои записи\n"
+            "/import [год] — загрузить файл монитора или дневника\n"
             "Можно написать: «Запиши сахар 6.4, короткий 3 ед., прогулка 30 минут».\n\n"
             "Администратор:\n"
             "/add_user ID Имя — добавить пользователя\n"
@@ -170,6 +176,60 @@ def create_router(
             entries = await JournalRepository(session).list_recent(message.from_user.id, limit)
         for text in format_journal_messages(entries, journal_timezone):
             await message.answer(text)
+
+    async def import_document(message: Message, year_value: str | None) -> None:
+        if message.from_user is None or message.document is None or message.bot is None:
+            return
+        try:
+            current_year = datetime.now(journal_timezone).year
+            year = parse_import_year(year_value, current_year)
+            downloaded = await message.bot.download(message.document)
+            if downloaded is None:
+                raise JournalImportError("Telegram не вернул содержимое файла.")
+            payload = downloaded.read()
+            parsed = parse_journal_file(
+                payload,
+                message.document.file_name or "journal.txt",
+                year,
+                journal_timezone,
+            )
+            async with session_factory() as session:
+                added, skipped = await JournalRepository(session).add_many(
+                    message.from_user.id,
+                    parsed.entries,
+                    journal_timezone,
+                )
+                await session.commit()
+        except JournalImportError as error:
+            await message.answer(f"Не удалось импортировать файл: {error}")
+            return
+        except Exception:
+            logger.exception("Failed to import journal document")
+            await message.answer("Не удалось импортировать файл из-за внутренней ошибки.")
+            return
+
+        await message.answer(
+            f"Импорт {parsed.source} завершён: добавлено {added}, "
+            f"пропущено повторов {skipped}."
+        )
+
+    @router.message(Command("import"), F.document)
+    async def import_document_with_year(message: Message, command: CommandObject) -> None:
+        await import_document(message, command.args)
+
+    @router.message(F.document)
+    async def import_document_without_command(message: Message) -> None:
+        caption = message.caption or ""
+        year_value = caption if caption.lstrip().startswith("/import") else None
+        await import_document(message, year_value)
+
+    @router.message(Command("import"))
+    async def import_help(message: Message) -> None:
+        await message.answer(
+            "Прикрепите файл Hematonix (.xls/.xlsx) или MelStudio (.txt). "
+            "Если в дневнике нет года, добавьте подпись /import 2026. "
+            "Без подписи используется текущий год."
+        )
 
     @router.message(F.text)
     async def food_question(message: Message) -> None:

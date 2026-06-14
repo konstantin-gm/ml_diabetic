@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime, tzinfo
 from decimal import Decimal
 
@@ -281,3 +282,84 @@ class JournalRepository:
         )
         entries = (await self._session.scalars(statement)).all()
         return [JournalEntryRecord.model_validate(entry) for entry in entries]
+
+    async def add_many(
+        self,
+        telegram_user_id: int,
+        entries: Sequence[JournalEntryCreate],
+        default_timezone: tzinfo,
+    ) -> tuple[int, int]:
+        if not entries:
+            return 0, 0
+
+        normalized = [self._normalize_entry(entry, default_timezone) for entry in entries]
+        timestamps = [occurred_at for occurred_at, _ in normalized]
+        statement = select(JournalEntry).where(
+            JournalEntry.telegram_user_id == telegram_user_id,
+            JournalEntry.occurred_at >= min(timestamps),
+            JournalEntry.occurred_at <= max(timestamps),
+        )
+        existing = (await self._session.scalars(statement)).all()
+        known_keys = {self._model_key(entry, default_timezone) for entry in existing}
+
+        models: list[JournalEntry] = []
+        skipped = 0
+        for occurred_at, entry in normalized:
+            key = self._data_key(occurred_at, entry)
+            if key in known_keys:
+                skipped += 1
+                continue
+            known_keys.add(key)
+            models.append(
+                JournalEntry(
+                    telegram_user_id=telegram_user_id,
+                    occurred_at=occurred_at,
+                    duration_minutes=entry.duration_minutes,
+                    short_insulin_units=entry.short_insulin_units,
+                    long_insulin_units=entry.long_insulin_units,
+                    food=entry.food,
+                    physical_activity=entry.physical_activity,
+                    blood_glucose_mmol_l=entry.blood_glucose_mmol_l,
+                )
+            )
+
+        self._session.add_all(models)
+        await self._session.flush()
+        return len(models), skipped
+
+    @staticmethod
+    def _normalize_entry(
+        entry: JournalEntryCreate,
+        default_timezone: tzinfo,
+    ) -> tuple[datetime, JournalEntryCreate]:
+        occurred_at = entry.occurred_at or datetime.now(UTC)
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=default_timezone)
+        return occurred_at, entry
+
+    @staticmethod
+    def _data_key(occurred_at: datetime, entry: JournalEntryCreate) -> tuple[object, ...]:
+        return (
+            occurred_at.astimezone(UTC),
+            entry.duration_minutes,
+            entry.short_insulin_units,
+            entry.long_insulin_units,
+            entry.food,
+            entry.physical_activity,
+            entry.blood_glucose_mmol_l,
+        )
+
+    @classmethod
+    def _model_key(cls, entry: JournalEntry, default_timezone: tzinfo) -> tuple[object, ...]:
+        occurred_at = entry.occurred_at
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=default_timezone)
+        return (
+            occurred_at.astimezone(UTC),
+            entry.duration_minutes,
+            entry.short_insulin_units,
+            entry.long_insulin_units,
+            entry.food,
+            entry.physical_activity,
+            entry.blood_glucose_mmol_l,
+        )

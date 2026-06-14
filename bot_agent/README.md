@@ -41,11 +41,17 @@ Each authorized user has a private journal:
 /log сахар 6.4 ммоль/л, короткий инсулин 3 ед., гречка, прогулка 30 минут
 /journal
 /journal 50
+/import 2026
 ```
 
 Journal entries may contain a timestamp, duration, short and long insulin,
 food, physical activity, and blood glucose in mmol/L. Insulin values are stored
 as reported; the bot does not calculate or recommend doses.
+
+Send a Hematonix `.xls/.xlsx` monitor export or a MelStudio `.txt` diary as a
+Telegram document. For diary dates without a year, add `/import 2026` as the
+document caption; otherwise the current year is used. Re-importing identical
+records does not create duplicates.
 
 The bot only calculates carbohydrates. It does not recommend insulin doses or
 provide medical advice.
