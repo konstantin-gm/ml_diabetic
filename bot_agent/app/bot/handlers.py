@@ -276,7 +276,11 @@ def create_router(
                 occurred_at_from,
                 occurred_at_to,
             )
-        statistics = calculate_journal_statistics(entries)
+        statistics = calculate_journal_statistics(
+            entries,
+            journal_timezone,
+            journal_xe_carbs_grams,
+        )
         await message.answer(format_journal_statistics(statistics, days))
 
     @router.message(Command("delete_last"))

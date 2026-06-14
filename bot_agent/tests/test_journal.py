@@ -345,40 +345,77 @@ def test_formats_journal_and_parses_limit() -> None:
 
 def test_calculates_and_formats_journal_statistics() -> None:
     entries = [
-        _journal_record(1, carbohydrates="10", short_insulin="2"),
-        _journal_record(2, carbohydrates="20", short_insulin=None),
-        _journal_record(3, carbohydrates="40", short_insulin="4"),
-        _journal_record(4, carbohydrates=None, short_insulin=None),
+        _journal_record(1, day=11, carbohydrates="10", short_insulin="2"),
+        _journal_record(2, day=11, carbohydrates="20", short_insulin=None),
+        _journal_record(3, day=12, carbohydrates="40", short_insulin="4"),
+        _journal_record(4, day=13, carbohydrates=None, short_insulin=None),
     ]
 
-    statistics = calculate_journal_statistics(entries)
+    statistics = calculate_journal_statistics(entries, ZoneInfo("UTC"), Decimal("10"))
     message = format_journal_statistics(statistics, 14)
 
     assert statistics.entries_count == 4
     assert statistics.carbohydrates is not None
-    assert statistics.carbohydrates.count == 3
-    assert statistics.carbohydrates.average == Decimal("23.33")
-    assert statistics.carbohydrates.median == Decimal("20.00")
-    assert statistics.carbohydrates.minimum == Decimal("10")
+    assert statistics.carbohydrates.count == 2
+    assert statistics.carbohydrates.average == Decimal("35.00")
+    assert statistics.carbohydrates.median == Decimal("35.00")
+    assert statistics.carbohydrates.minimum == Decimal("30")
     assert statistics.carbohydrates.maximum == Decimal("40")
     assert statistics.short_insulin is not None
     assert statistics.short_insulin.average == Decimal("3.00")
     assert statistics.short_insulin.median == Decimal("3.00")
-    assert "Статистика журнала за последние 14 дн. Записей: 4." in message
-    assert "Углеводы (3 знач.)" in message
-    assert "Короткий инсулин (2 знач.)" in message
+    assert statistics.median_carbohydrates_bread_units == Decimal("3.50")
+    assert statistics.median_insulin_per_bread_unit == Decimal("0.86")
+    assert "Статистика суточных сумм за 14 завершённых дн." in message
+    assert "Углеводы за сутки (2 дн. с данными)" in message
+    assert "Короткий инсулин за сутки (2 дн. с данными)" in message
+    assert "0.86 ед./ХЕ" in message
+    assert "3 ед. / 3.5 ХЕ" in message
+    assert "не рекомендация дозы" in message
 
 
 def test_statistics_handles_missing_values_and_parses_days() -> None:
-    statistics = calculate_journal_statistics([_journal_record(1)])
+    statistics = calculate_journal_statistics(
+        [_journal_record(1)],
+        ZoneInfo("UTC"),
+        Decimal("12"),
+    )
 
     assert parse_statistics_days(None) == 7
     assert parse_statistics_days("30") == 30
     assert statistics.carbohydrates is None
     assert statistics.short_insulin is None
+    assert statistics.median_carbohydrates_bread_units is None
+    assert statistics.median_insulin_per_bread_unit is None
     message = format_journal_statistics(statistics, 7)
-    assert "Углеводы: нет данных." in message
-    assert "Короткий инсулин: нет данных." in message
+    assert "Углеводы за сутки: нет данных." in message
+    assert "Короткий инсулин за сутки: нет данных." in message
+    assert "Коэффициент медиан: недостаточно данных." in message
+
+
+def test_statistics_groups_entries_by_local_date() -> None:
+    entries = [
+        _journal_record(
+            1,
+            occurred_at=datetime(2026, 6, 10, 22, 30, tzinfo=UTC),
+            carbohydrates="12",
+        ),
+        _journal_record(
+            2,
+            occurred_at=datetime(2026, 6, 11, 20, 30, tzinfo=UTC),
+            carbohydrates="24",
+        ),
+    ]
+
+    statistics = calculate_journal_statistics(
+        entries,
+        ZoneInfo("Europe/Moscow"),
+        Decimal("12"),
+    )
+
+    assert statistics.carbohydrates is not None
+    assert statistics.carbohydrates.count == 1
+    assert statistics.carbohydrates.median == Decimal("36.00")
 
 
 def test_statistics_period_uses_previous_completed_local_calendar_days() -> None:
@@ -408,13 +445,16 @@ def test_rejects_invalid_statistics_days(value: str) -> None:
 
 def _journal_record(
     entry_id: int,
+    day: int = 14,
     carbohydrates: str | None = None,
     short_insulin: str | None = None,
+    occurred_at: datetime | None = None,
 ) -> JournalEntryRecord:
+    timestamp = occurred_at or datetime(2026, 6, day, entry_id, tzinfo=UTC)
     return JournalEntryRecord(
         id=entry_id,
         telegram_user_id=1001,
-        occurred_at=datetime(2026, 6, 14, entry_id, tzinfo=UTC),
+        occurred_at=timestamp,
         duration_minutes=None,
         short_insulin_units=Decimal(short_insulin) if short_insulin is not None else None,
         long_insulin_units=None,
@@ -422,5 +462,5 @@ def _journal_record(
         carbohydrates_grams=Decimal(carbohydrates) if carbohydrates is not None else None,
         physical_activity=None,
         blood_glucose_mmol_l=None,
-        created_at=datetime(2026, 6, 14, entry_id, tzinfo=UTC),
+        created_at=timestamp,
     )

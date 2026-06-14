@@ -62,12 +62,12 @@ food, carbohydrate grams, physical activity, and blood glucose in mmol/L.
 Users may enter carbohydrates in grams or bread units (ХЕ). The database stores
 grams only; `JOURNAL_XE_CARBS_GRAMS` controls the conversion and defaults to 12.
 Insulin values are stored as reported; the bot does not calculate or recommend doses.
-`/stats [days]` reports average, median, minimum, and maximum carbohydrates and
-short insulin values for the current user's entries during the last N days. The
-default period is 7 days. The interval consists of calendar days from 00:00 to
-24:00 in `JOURNAL_TIMEZONE`. The current incomplete day is excluded, so the
-command uses the previous N completed days. Missing values are excluded from
-each metric.
+`/stats [days]` first totals carbohydrates and short insulin for each local day,
+then reports average, median, minimum, and maximum daily totals. It also reports
+the ratio of median daily short insulin to median daily carbohydrates in ХЕ,
+using `JOURNAL_XE_CARBS_GRAMS`. The default period is 7 days. The interval uses
+calendar days from 00:00 to 24:00 in `JOURNAL_TIMEZONE`; the current incomplete
+day is excluded. A day is included in a metric only when that metric was recorded.
 `/delete_last` or the phrase `Удали последнюю запись в журнале` removes only the
 current user's most recent journal entry without requiring a timestamp.
 `/edit` finds the current user's entry by local date and time to the minute and

@@ -133,8 +133,10 @@ Personal journal:
 - Users add entries with `/log <data>` or a natural-language request such as
   "Запиши сахар 6.4 ммоль/л, короткий инсулин 3 ед., прогулка 30 минут".
 - `/journal [limit]` shows only the current user's recent entries.
-- `/stats [days]` shows average, median, minimum, and maximum carbohydrates and
-  short insulin values from the current user's entries during the last N days.
+- `/stats [days]` groups the current user's entries by local calendar date, sums
+  carbohydrates and short insulin per day, then shows average, median, minimum,
+  and maximum daily totals. It also shows median daily short insulin divided by
+  median daily carbohydrates in ХЕ, using `JOURNAL_XE_CARBS_GRAMS`.
   The default period is 7 days. Statistics use whole local calendar days from
   00:00 to 24:00 in `JOURNAL_TIMEZONE`. The current incomplete day is excluded,
   so the command uses the previous N completed days. Missing values are excluded

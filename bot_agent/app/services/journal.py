@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, tzinfo
+from datetime import date, datetime, time, timedelta, tzinfo
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.agent.schemas import JournalEntryRecord
@@ -26,6 +26,8 @@ class JournalStatistics:
     entries_count: int
     carbohydrates: NumericStatistics | None
     short_insulin: NumericStatistics | None
+    median_carbohydrates_bread_units: Decimal | None
+    median_insulin_per_bread_unit: Decimal | None
 
 
 def parse_journal_limit(args: str | None, default: int = 20) -> int:
@@ -69,37 +71,75 @@ def statistics_period_bounds(
     )
 
 
-def calculate_journal_statistics(entries: Sequence[JournalEntryRecord]) -> JournalStatistics:
-    carbohydrates = [
-        entry.carbohydrates_grams
-        for entry in entries
-        if entry.carbohydrates_grams is not None
-    ]
-    short_insulin = [
-        entry.short_insulin_units
-        for entry in entries
-        if entry.short_insulin_units is not None
-    ]
+def calculate_journal_statistics(
+    entries: Sequence[JournalEntryRecord],
+    display_timezone: tzinfo,
+    carbs_per_bread_unit: Decimal,
+) -> JournalStatistics:
+    if carbs_per_bread_unit <= 0:
+        raise ValueError("carbs_per_bread_unit must be positive")
+
+    carbohydrates_by_day: dict[date, Decimal] = {}
+    short_insulin_by_day: dict[date, Decimal] = {}
+    for entry in entries:
+        local_date = entry.occurred_at.astimezone(display_timezone).date()
+        if entry.carbohydrates_grams is not None:
+            carbohydrates_by_day[local_date] = (
+                carbohydrates_by_day.get(local_date, Decimal(0))
+                + entry.carbohydrates_grams
+            )
+        if entry.short_insulin_units is not None:
+            short_insulin_by_day[local_date] = (
+                short_insulin_by_day.get(local_date, Decimal(0))
+                + entry.short_insulin_units
+            )
+
+    carbohydrates = _numeric_statistics(list(carbohydrates_by_day.values()))
+    short_insulin = _numeric_statistics(list(short_insulin_by_day.values()))
+    median_carbohydrates_bread_units = _median_carbohydrates_bread_units(
+        carbohydrates,
+        carbs_per_bread_unit,
+    )
     return JournalStatistics(
         entries_count=len(entries),
-        carbohydrates=_numeric_statistics(carbohydrates),
-        short_insulin=_numeric_statistics(short_insulin),
+        carbohydrates=carbohydrates,
+        short_insulin=short_insulin,
+        median_carbohydrates_bread_units=median_carbohydrates_bread_units,
+        median_insulin_per_bread_unit=_median_insulin_per_bread_unit(
+            carbohydrates,
+            short_insulin,
+            carbs_per_bread_unit,
+        ),
     )
 
 
 def format_journal_statistics(statistics: JournalStatistics, days: int) -> str:
-    header = f"Статистика журнала за последние {days} дн. Записей: {statistics.entries_count}."
-    return "\n\n".join(
-        [
-            header,
-            _format_numeric_statistics("Углеводы", "г", statistics.carbohydrates),
-            _format_numeric_statistics(
-                "Короткий инсулин",
-                "ед.",
-                statistics.short_insulin,
-            ),
-        ]
+    header = (
+        f"Статистика суточных сумм за {days} завершённых дн. "
+        f"Записей журнала: {statistics.entries_count}."
     )
+    blocks = [
+        header,
+        _format_numeric_statistics("Углеводы за сутки", "г", statistics.carbohydrates),
+        _format_numeric_statistics(
+            "Короткий инсулин за сутки",
+            "ед.",
+            statistics.short_insulin,
+        ),
+    ]
+    if statistics.median_insulin_per_bread_unit is None:
+        blocks.append("Коэффициент медиан: недостаточно данных.")
+    else:
+        assert statistics.short_insulin is not None
+        assert statistics.median_carbohydrates_bread_units is not None
+        blocks.append(
+            "Коэффициент медиан короткого инсулина к углеводам: "
+            f"{_decimal(statistics.median_insulin_per_bread_unit)} ед./ХЕ "
+            f"({_decimal(statistics.short_insulin.median)} ед. / "
+            f"{_decimal(statistics.median_carbohydrates_bread_units)} ХЕ)."
+        )
+    blocks.append("Это статистический показатель прошлых записей, не рекомендация дозы.")
+    return "\n\n".join(blocks)
 
 
 def format_journal_messages(
@@ -179,6 +219,32 @@ def _median(values: Sequence[Decimal]) -> Decimal:
     return (ordered[middle - 1] + ordered[middle]) / Decimal(2)
 
 
+def _median_insulin_per_bread_unit(
+    carbohydrates: NumericStatistics | None,
+    short_insulin: NumericStatistics | None,
+    carbs_per_bread_unit: Decimal,
+) -> Decimal | None:
+    if carbohydrates is None or short_insulin is None or carbohydrates.median <= 0:
+        return None
+    median_carbohydrates_bread_units = carbohydrates.median / carbs_per_bread_unit
+    return (short_insulin.median / median_carbohydrates_bread_units).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
+
+
+def _median_carbohydrates_bread_units(
+    carbohydrates: NumericStatistics | None,
+    carbs_per_bread_unit: Decimal,
+) -> Decimal | None:
+    if carbohydrates is None:
+        return None
+    return (carbohydrates.median / carbs_per_bread_unit).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
+
+
 def _format_numeric_statistics(
     title: str,
     unit: str,
@@ -187,7 +253,7 @@ def _format_numeric_statistics(
     if statistics is None:
         return f"{title}: нет данных."
     return (
-        f"{title} ({statistics.count} знач.):\n"
+        f"{title} ({statistics.count} дн. с данными):\n"
         f"среднее {_decimal(statistics.average)} {unit}; "
         f"медиана {_decimal(statistics.median)} {unit}; "
         f"мин. {_decimal(statistics.minimum)} {unit}; "
