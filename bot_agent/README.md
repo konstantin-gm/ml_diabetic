@@ -83,6 +83,9 @@ The bot container applies Alembic migrations before starting long polling.
 PostgreSQL is exposed on `localhost:5434` by default to avoid conflicts with a
 locally installed PostgreSQL. Override it with `POSTGRES_PORT` when needed.
 
+For a production installation on Ubuntu or Debian VDS, see the Russian-language
+[deployment guide](DEPLOYMENT_VDS.md).
+
 ## Local development
 
 Python 3.12+ and a running PostgreSQL instance are required.
