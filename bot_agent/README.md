@@ -35,6 +35,18 @@ can then grant access in Telegram:
 /users
 ```
 
+Each authorized user has a private journal:
+
+```text
+/log сахар 6.4 ммоль/л, короткий инсулин 3 ед., гречка, прогулка 30 минут
+/journal
+/journal 50
+```
+
+Journal entries may contain a timestamp, duration, short and long insulin,
+food, physical activity, and blood glucose in mmol/L. Insulin values are stored
+as reported; the bot does not calculate or recommend doses.
+
 The bot only calculates carbohydrates. It does not recommend insulin doses or
 provide medical advice.
 

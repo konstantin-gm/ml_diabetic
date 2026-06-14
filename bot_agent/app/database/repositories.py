@@ -2,15 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, tzinfo
 from decimal import Decimal
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.agent.schemas import FoodData, FoodRecord, TelegramUserRecord
-from app.database.models import Food, FoodAlias, TelegramUser
+from app.agent.schemas import (
+    FoodData,
+    FoodRecord,
+    JournalEntryCreate,
+    JournalEntryRecord,
+    TelegramUserRecord,
+)
+from app.database.models import Food, FoodAlias, JournalEntry, TelegramUser
 
 _WHITESPACE = re.compile(r"\s+")
 
@@ -232,3 +238,46 @@ class TelegramUserRepository:
         )
         users = (await self._session.scalars(statement)).all()
         return [TelegramUserRecord.model_validate(user) for user in users]
+
+
+class JournalRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(
+        self,
+        telegram_user_id: int,
+        data: JournalEntryCreate,
+        default_timezone: tzinfo,
+    ) -> JournalEntryRecord:
+        occurred_at = data.occurred_at or datetime.now(UTC)
+        if occurred_at.tzinfo is None:
+            occurred_at = occurred_at.replace(tzinfo=default_timezone)
+
+        entry = JournalEntry(
+            telegram_user_id=telegram_user_id,
+            occurred_at=occurred_at,
+            duration_minutes=data.duration_minutes,
+            short_insulin_units=data.short_insulin_units,
+            long_insulin_units=data.long_insulin_units,
+            food=data.food,
+            physical_activity=data.physical_activity,
+            blood_glucose_mmol_l=data.blood_glucose_mmol_l,
+        )
+        self._session.add(entry)
+        await self._session.flush()
+        await self._session.refresh(entry)
+        record = JournalEntryRecord.model_validate(entry)
+        return record.model_copy(update={"occurred_at": occurred_at})
+
+    async def list_recent(self, telegram_user_id: int, limit: int = 20) -> list[JournalEntryRecord]:
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        statement = (
+            select(JournalEntry)
+            .where(JournalEntry.telegram_user_id == telegram_user_id)
+            .order_by(JournalEntry.occurred_at.desc(), JournalEntry.id.desc())
+            .limit(limit)
+        )
+        entries = (await self._session.scalars(statement)).all()
+        return [JournalEntryRecord.model_validate(entry) for entry in entries]

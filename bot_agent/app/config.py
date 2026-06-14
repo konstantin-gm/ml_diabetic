@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     openai_model: OpenAIModelName = "gpt-5.4-mini"
     database_url: str = "postgresql+asyncpg://diabet:diabet@localhost:5432/diabet"
     telegram_admin_ids: str = ""
+    journal_timezone: str = "Europe/Moscow"
     log_level: str = "INFO"
 
     def parsed_telegram_admin_ids(self) -> list[int]:

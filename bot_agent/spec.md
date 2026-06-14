@@ -53,6 +53,7 @@ Telegram
     - lookup food online if missing
     - save new food data
     - calculate carbs
+    - add a personal journal entry
     |
  PostgreSQL
 
@@ -119,6 +120,16 @@ Access control:
 - Administrators add users with `/add_user <telegram_id> [name]`.
 - Administrators view the whitelist with `/users`.
 
+Personal journal:
+
+- Every journal entry belongs to exactly one Telegram user.
+- An entry has a timestamp and may include duration, short insulin, long insulin,
+  food, physical activity, and blood glucose in mmol/L.
+- Users add entries with `/log <data>` or a natural-language request such as
+  "Запиши сахар 6.4 ммоль/л, короткий инсулин 3 ед., прогулка 30 минут".
+- `/journal [limit]` shows only the current user's recent entries.
+- The bot stores insulin values but never calculates or recommends insulin doses.
+
 
 ## Database
 
@@ -163,6 +174,21 @@ created_at
 updated_at
 last_seen_at
 
+Create table journal_entries:
+
+fields:
+
+id
+telegram_user_id
+occurred_at
+duration_minutes
+short_insulin_units
+long_insulin_units
+food
+physical_activity
+blood_glucose_mmol_l
+created_at
+
 
 Example:
 
@@ -204,7 +230,8 @@ Agent must prefer:
 This is diabetes-related software.
 
 For now:
-- only calculate carbohydrates
+- calculate carbohydrates
+- store user-reported journal data
 - do NOT recommend insulin doses
 - do NOT give medical advice
 

@@ -83,3 +83,40 @@ class TelegramUser(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class JournalEntry(Base):
+    __tablename__ = "journal_entries"
+    __table_args__ = (
+        CheckConstraint(
+            "duration_minutes IS NULL OR duration_minutes > 0",
+            name="duration_positive",
+        ),
+        CheckConstraint(
+            "short_insulin_units IS NULL OR short_insulin_units >= 0",
+            name="short_insulin_nonnegative",
+        ),
+        CheckConstraint(
+            "long_insulin_units IS NULL OR long_insulin_units >= 0",
+            name="long_insulin_nonnegative",
+        ),
+        CheckConstraint(
+            "blood_glucose_mmol_l IS NULL OR blood_glucose_mmol_l > 0",
+            name="blood_glucose_positive",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    telegram_user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("telegram_users.telegram_user_id", ondelete="CASCADE"),
+        index=True,
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    duration_minutes: Mapped[int | None]
+    short_insulin_units: Mapped[Decimal | None] = mapped_column(Numeric(7, 2))
+    long_insulin_units: Mapped[Decimal | None] = mapped_column(Numeric(7, 2))
+    food: Mapped[str | None] = mapped_column(Text)
+    physical_activity: Mapped[str | None] = mapped_column(Text)
+    blood_glucose_mmol_l: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

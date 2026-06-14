@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class FoodData(BaseModel):
@@ -60,3 +60,44 @@ class TelegramUserRecord(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_seen_at: datetime | None
+
+
+class JournalEntryCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    occurred_at: datetime | None = None
+    duration_minutes: int | None = Field(default=None, gt=0, le=10080)
+    short_insulin_units: Decimal | None = Field(default=None, ge=0, le=1000)
+    long_insulin_units: Decimal | None = Field(default=None, ge=0, le=1000)
+    food: str | None = Field(default=None, max_length=2000)
+    physical_activity: str | None = Field(default=None, max_length=2000)
+    blood_glucose_mmol_l: Decimal | None = Field(default=None, gt=0, le=100)
+
+    @field_validator("food", "physical_activity")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def has_content(self) -> JournalEntryCreate:
+        values = (
+            self.duration_minutes,
+            self.short_insulin_units,
+            self.long_insulin_units,
+            self.food,
+            self.physical_activity,
+            self.blood_glucose_mmol_l,
+        )
+        if all(value is None for value in values):
+            raise ValueError("journal entry must contain at least one value")
+        return self
+
+
+class JournalEntryRecord(JournalEntryCreate):
+    id: int
+    telegram_user_id: int
+    occurred_at: datetime
+    created_at: datetime
