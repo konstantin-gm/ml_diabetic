@@ -33,6 +33,7 @@ async def test_journal_entries_are_isolated_by_user(tmp_path) -> None:  # type: 
                 blood_glucose_mmol_l=Decimal("6.4"),
                 short_insulin_units=Decimal("3"),
                 food="гречка",
+                carbohydrates_grams=Decimal("35.5"),
             ),
             ZoneInfo("Europe/Moscow"),
         )
@@ -45,6 +46,7 @@ async def test_journal_entries_are_isolated_by_user(tmp_path) -> None:  # type: 
 
     assert first.telegram_user_id == 1001
     assert first.blood_glucose_mmol_l == Decimal("6.40")
+    assert first.carbohydrates_grams == Decimal("35.50")
 
     async with sessions() as session:
         first_user_entries = await JournalRepository(session).list_recent(1001)
@@ -94,6 +96,7 @@ def test_formats_journal_and_parses_limit() -> None:
         short_insulin_units=Decimal("3"),
         long_insulin_units=None,
         food="гречка",
+        carbohydrates_grams=Decimal("35.5"),
         physical_activity="прогулка",
         blood_glucose_mmol_l=Decimal("6.4"),
         created_at=datetime(2026, 6, 14, 9, 31, tzinfo=UTC),
@@ -106,6 +109,7 @@ def test_formats_journal_and_parses_limit() -> None:
     assert "14.06.2026 12:30" in messages[0]
     assert "сахар 6.4 ммоль/л" in messages[0]
     assert "короткий инсулин 3 ед." in messages[0]
+    assert "углеводы 35.5 г" in messages[0]
     assert "продолжительность 30 мин." in messages[0]
 
 

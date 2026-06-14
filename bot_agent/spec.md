@@ -124,7 +124,9 @@ Personal journal:
 
 - Every journal entry belongs to exactly one Telegram user.
 - An entry has a timestamp and may include duration, short insulin, long insulin,
-  food, physical activity, and blood glucose in mmol/L.
+  food, carbohydrate grams, physical activity, and blood glucose in mmol/L.
+- Users may enter carbohydrates in grams or ХЕ. The database stores grams only;
+  `JOURNAL_XE_CARBS_GRAMS` configures the conversion and defaults to 12 g per ХЕ.
 - Users add entries with `/log <data>` or a natural-language request such as
   "Запиши сахар 6.4 ммоль/л, короткий инсулин 3 ед., прогулка 30 минут".
 - `/journal [limit]` shows only the current user's recent entries.
@@ -189,6 +191,7 @@ duration_minutes
 short_insulin_units
 long_insulin_units
 food
+carbohydrates_grams
 physical_activity
 blood_glucose_mmol_l
 created_at

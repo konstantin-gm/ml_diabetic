@@ -262,6 +262,7 @@ class JournalRepository:
             short_insulin_units=data.short_insulin_units,
             long_insulin_units=data.long_insulin_units,
             food=data.food,
+            carbohydrates_grams=data.carbohydrates_grams,
             physical_activity=data.physical_activity,
             blood_glucose_mmol_l=data.blood_glucose_mmol_l,
         )
@@ -318,6 +319,7 @@ class JournalRepository:
                     short_insulin_units=entry.short_insulin_units,
                     long_insulin_units=entry.long_insulin_units,
                     food=entry.food,
+                    carbohydrates_grams=entry.carbohydrates_grams,
                     physical_activity=entry.physical_activity,
                     blood_glucose_mmol_l=entry.blood_glucose_mmol_l,
                 )
@@ -345,6 +347,7 @@ class JournalRepository:
             entry.short_insulin_units,
             entry.long_insulin_units,
             entry.food,
+            entry.carbohydrates_grams,
             entry.physical_activity,
             entry.blood_glucose_mmol_l,
         )
@@ -360,6 +363,7 @@ class JournalRepository:
             entry.short_insulin_units,
             entry.long_insulin_units,
             entry.food,
+            entry.carbohydrates_grams,
             entry.physical_activity,
             entry.blood_glucose_mmol_l,
         )

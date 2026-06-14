@@ -11,6 +11,7 @@ from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
 from app.agent.schemas import JournalEntryCreate
+from app.services.carbs import bread_units_to_carbohydrates
 
 MAX_IMPORT_BYTES = 10 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
@@ -75,6 +76,7 @@ def parse_journal_file(
     filename: str,
     default_year: int,
     timezone: tzinfo,
+    carbs_per_bread_unit: Decimal = Decimal("12"),
 ) -> ParsedJournalImport:
     if not payload:
         raise JournalImportError("Файл пуст.")
@@ -84,7 +86,10 @@ def parse_journal_file(
     suffix = PurePath(filename).suffix.lower()
     if payload.startswith(b"PK\x03\x04") or suffix in {".xls", ".xlsx"}:
         return ParsedJournalImport("Hematonix", _parse_hematonix(payload, timezone))
-    return ParsedJournalImport("MelStudio", _parse_melstudio(payload, default_year, timezone))
+    return ParsedJournalImport(
+        "MelStudio",
+        _parse_melstudio(payload, default_year, timezone, carbs_per_bread_unit),
+    )
 
 
 def parse_import_year(value: str | None, fallback: int) -> int:
@@ -141,6 +146,7 @@ def _parse_melstudio(
     payload: bytes,
     default_year: int,
     timezone: tzinfo,
+    carbs_per_bread_unit: Decimal,
 ) -> list[JournalEntryCreate]:
     text = _decode_text(payload)
     rows = list(csv.reader(io.StringIO(text), delimiter="\t"))
@@ -167,7 +173,12 @@ def _parse_melstudio(
                     duration_minutes=_parse_duration(activity),
                     short_insulin_units=short_insulin,
                     long_insulin_units=long_insulin,
-                    food=_format_food(None if activity else note, bread_units),
+                    food=None if activity else note,
+                    carbohydrates_grams=(
+                        bread_units_to_carbohydrates(bread_units, carbs_per_bread_unit)
+                        if bread_units is not None
+                        else None
+                    ),
                     physical_activity=activity,
                 )
             )
@@ -272,12 +283,3 @@ def _parse_duration(value: str | None) -> int | None:
         return None
     match = _DURATION.search(value)
     return int(match.group("minutes")) if match else None
-
-
-def _format_food(note: str | None, bread_units: Decimal | None) -> str | None:
-    bread_units_text = None
-    if bread_units is not None:
-        bread_units_text = f"{format(bread_units.normalize(), 'f')} ХЕ"
-    if note and bread_units_text:
-        return f"{note}; {bread_units_text}"
-    return note or bread_units_text

@@ -70,6 +70,7 @@ class JournalEntryCreate(BaseModel):
     short_insulin_units: Decimal | None = Field(default=None, ge=0, le=1000)
     long_insulin_units: Decimal | None = Field(default=None, ge=0, le=1000)
     food: str | None = Field(default=None, max_length=2000)
+    carbohydrates_grams: Decimal | None = Field(default=None, ge=0, le=10000)
     physical_activity: str | None = Field(default=None, max_length=2000)
     blood_glucose_mmol_l: Decimal | None = Field(default=None, gt=0, le=100)
 
@@ -88,6 +89,7 @@ class JournalEntryCreate(BaseModel):
             self.short_insulin_units,
             self.long_insulin_units,
             self.food,
+            self.carbohydrates_grams,
             self.physical_activity,
             self.blood_glucose_mmol_l,
         )

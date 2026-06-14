@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import SecretStr
+from decimal import Decimal
+
+from pydantic import Field, SecretStr
 from pydantic_ai.models.openai import OpenAIModelName
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,6 +16,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://diabet:diabet@localhost:5432/diabet"
     telegram_admin_ids: str = ""
     journal_timezone: str = "Europe/Moscow"
+    journal_xe_carbs_grams: Decimal = Field(default=Decimal("12"), gt=0, le=100)
     log_level: str = "INFO"
 
     def parsed_telegram_admin_ids(self) -> list[int]:

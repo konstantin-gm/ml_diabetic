@@ -104,6 +104,10 @@ class JournalEntry(Base):
             "blood_glucose_mmol_l IS NULL OR blood_glucose_mmol_l > 0",
             name="blood_glucose_positive",
         ),
+        CheckConstraint(
+            "carbohydrates_grams IS NULL OR carbohydrates_grams >= 0",
+            name="carbohydrates_nonnegative",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -117,6 +121,7 @@ class JournalEntry(Base):
     short_insulin_units: Mapped[Decimal | None] = mapped_column(Numeric(7, 2))
     long_insulin_units: Mapped[Decimal | None] = mapped_column(Numeric(7, 2))
     food: Mapped[str | None] = mapped_column(Text)
+    carbohydrates_grams: Mapped[Decimal | None] = mapped_column(Numeric(9, 2))
     physical_activity: Mapped[str | None] = mapped_column(Text)
     blood_glucose_mmol_l: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

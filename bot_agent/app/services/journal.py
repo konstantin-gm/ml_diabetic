@@ -42,6 +42,8 @@ def _format_entry(entry: JournalEntryRecord, display_timezone: tzinfo) -> str:
         values.append(f"короткий инсулин {_decimal(entry.short_insulin_units)} ед.")
     if entry.long_insulin_units is not None:
         values.append(f"длинный инсулин {_decimal(entry.long_insulin_units)} ед.")
+    if entry.carbohydrates_grams is not None:
+        values.append(f"углеводы {_decimal(entry.carbohydrates_grams)} г")
     if entry.food:
         values.append(f"еда: {entry.food}")
     if entry.physical_activity:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, tzinfo
+from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
@@ -35,9 +36,11 @@ def create_router(
     session_factory: async_sessionmaker[AsyncSession],
     online_lookup: OnlineFoodLookup,
     journal_timezone: tzinfo,
+    journal_xe_carbs_grams: Decimal,
 ) -> Router:
     router = Router(name="food")
     router.message.middleware(WhitelistMiddleware(session_factory))
+    xe_grams = format(journal_xe_carbs_grams.normalize(), "f")
 
     @router.message(CommandStart())
     async def start(message: Message) -> None:
@@ -51,7 +54,8 @@ def create_router(
             "/log данные — добавить запись\n"
             "/journal [количество] — показать свои записи\n"
             "/import [год] — загрузить файл монитора или дневника\n"
-            "Можно написать: «Запиши сахар 6.4, короткий 3 ед., прогулка 30 минут».\n\n"
+            "Можно написать: «Запиши сахар 6.4, углеводы 48 г, короткий 3 ед.» "
+            f"или указать углеводы в ХЕ. Сейчас 1 ХЕ = {xe_grams} г углеводов.\n\n"
             "Администратор:\n"
             "/add_user ID Имя — добавить пользователя\n"
             "/users — показать белый список\n\n"
@@ -141,6 +145,7 @@ def create_router(
                         online_lookup=online_lookup,
                         telegram_user_id=message.from_user.id,
                         journal_timezone=journal_timezone,
+                        journal_xe_carbs_grams=journal_xe_carbs_grams,
                     ),
                 )
                 await session.commit()
@@ -157,7 +162,8 @@ def create_router(
     async def add_log_entry(message: Message, command: CommandObject) -> None:
         if not command.args or not command.args.strip():
             await message.answer(
-                "Использование: /log сахар 6.4 ммоль/л, короткий инсулин 3 ед., прогулка 30 минут"
+                "Использование: /log сахар 6.4 ммоль/л, углеводы 4 ХЕ, "
+                "короткий инсулин 3 ед., прогулка 30 минут"
             )
             return
         await run_agent(message, f"Запиши в мой журнал: {command.args}")
@@ -192,6 +198,7 @@ def create_router(
                 message.document.file_name or "journal.txt",
                 year,
                 journal_timezone,
+                journal_xe_carbs_grams,
             )
             async with session_factory() as session:
                 added, skipped = await JournalRepository(session).add_many(

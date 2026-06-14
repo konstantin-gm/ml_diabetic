@@ -40,7 +40,13 @@ async def main() -> None:
     bot = Bot(token=settings.telegram_bot_token.get_secret_value())
     dispatcher = Dispatcher()
     dispatcher.include_router(
-        create_router(agent, session_factory, online_lookup, journal_timezone)
+        create_router(
+            agent,
+            session_factory,
+            online_lookup,
+            journal_timezone,
+            settings.journal_xe_carbs_grams,
+        )
     )
 
     try:

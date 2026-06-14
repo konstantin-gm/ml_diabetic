@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.schemas import FoodData, JournalEntryCreate, JournalEntryRecord
 from app.database.repositories import FoodRepository, JournalRepository
-from app.services.carbs import calculate_carbohydrates, calculate_carbs_per_100g
+from app.services.carbs import (
+    calculate_carbohydrates,
+    calculate_carbs_per_100g,
+    resolve_journal_carbohydrates,
+)
 from app.services.online_food import OnlineFoodLookup
 
 
@@ -19,6 +23,7 @@ class FoodAgentDeps:
     online_lookup: OnlineFoodLookup
     telegram_user_id: int
     journal_timezone: tzinfo
+    journal_xe_carbs_grams: Decimal
 
 
 async def find_food(ctx: RunContext[FoodAgentDeps], name: str) -> FoodData | None:
@@ -58,21 +63,31 @@ async def add_journal_entry(
     short_insulin_units: Decimal | None = None,
     long_insulin_units: Decimal | None = None,
     food: str | None = None,
+    carbohydrates_grams: Decimal | None = None,
+    bread_units: Decimal | None = None,
     physical_activity: str | None = None,
     blood_glucose_mmol_l: Decimal | None = None,
 ) -> JournalEntryRecord:
     """Add a health journal entry for the current authorized Telegram user.
 
-    Record only values explicitly stated by the user. Insulin values are units,
-    blood glucose is mmol/L, and duration is whole minutes. Never infer or
-    recommend an insulin dose. Omit occurred_at to use the current time.
+    Record only values explicitly stated by the user. Carbohydrates are stored
+    in grams. Pass bread_units only when the user explicitly uses ХЕ; the tool
+    converts them using the configured grams-per-ХЕ value. Do not pass both
+    carbohydrates_grams and bread_units. Never infer or recommend an insulin
+    dose. Omit occurred_at to use the current time.
     """
+    resolved_carbohydrates = resolve_journal_carbohydrates(
+        carbohydrates_grams,
+        bread_units,
+        ctx.deps.journal_xe_carbs_grams,
+    )
     data = JournalEntryCreate(
         occurred_at=occurred_at,
         duration_minutes=duration_minutes,
         short_insulin_units=short_insulin_units,
         long_insulin_units=long_insulin_units,
         food=food,
+        carbohydrates_grams=resolved_carbohydrates,
         physical_activity=physical_activity,
         blood_glucose_mmol_l=blood_glucose_mmol_l,
     )

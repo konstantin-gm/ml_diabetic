@@ -23,7 +23,13 @@ def test_parses_melstudio_diary() -> None:
         "22 мая\t08:00\t-/-\t-\tВелосипед 30 минут.\t\n"
     ).encode()
 
-    parsed = parse_journal_file(payload, "diary.txt", 2026, ZoneInfo("Europe/Moscow"))
+    parsed = parse_journal_file(
+        payload,
+        "diary.txt",
+        2026,
+        ZoneInfo("Europe/Moscow"),
+        Decimal("12"),
+    )
 
     assert parsed.source == "MelStudio"
     assert len(parsed.entries) == 2
@@ -31,7 +37,8 @@ def test_parses_melstudio_diary() -> None:
         2026, 5, 21, 13, 9, tzinfo=ZoneInfo("Europe/Moscow")
     )
     assert parsed.entries[0].short_insulin_units == Decimal("9")
-    assert parsed.entries[0].food == "Обед4; 6 ХЕ"
+    assert parsed.entries[0].food == "Обед4"
+    assert parsed.entries[0].carbohydrates_grams == Decimal("72.00")
     assert parsed.entries[1].physical_activity == "Велосипед 30 минут."
     assert parsed.entries[1].duration_minutes == 30
 
