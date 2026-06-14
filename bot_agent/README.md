@@ -41,6 +41,7 @@ Each authorized user has a private journal:
 /log сахар 6.4 ммоль/л, короткий инсулин 3 ед., гречка, углеводы 4 ХЕ
 /journal
 /journal 50
+/export_journal_csv
 /import 2026
 ```
 
@@ -54,6 +55,9 @@ Send a Hematonix `.xls/.xlsx` monitor export or a MelStudio `.txt` diary as a
 Telegram document. For diary dates without a year, add `/import 2026` as the
 document caption; otherwise the current year is used. Re-importing identical
 records does not create duplicates.
+
+`/export_journal_csv` downloads the current user's complete journal as an
+Excel-friendly UTF-8 CSV. Other users' records are never included.
 
 The bot only calculates carbohydrates. It does not recommend insulin doses or
 provide medical advice.

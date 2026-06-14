@@ -284,6 +284,15 @@ class JournalRepository:
         entries = (await self._session.scalars(statement)).all()
         return [JournalEntryRecord.model_validate(entry) for entry in entries]
 
+    async def list_all(self, telegram_user_id: int) -> list[JournalEntryRecord]:
+        statement = (
+            select(JournalEntry)
+            .where(JournalEntry.telegram_user_id == telegram_user_id)
+            .order_by(JournalEntry.occurred_at, JournalEntry.id)
+        )
+        entries = (await self._session.scalars(statement)).all()
+        return [JournalEntryRecord.model_validate(entry) for entry in entries]
+
     async def add_many(
         self,
         telegram_user_id: int,

@@ -57,6 +57,7 @@ async def main() -> None:
                 BotCommand(command="export_csv", description="Скачать базу в CSV"),
                 BotCommand(command="log", description="Добавить запись в журнал"),
                 BotCommand(command="journal", description="Показать мой журнал"),
+                BotCommand(command="export_journal_csv", description="Скачать журнал в CSV"),
                 BotCommand(command="import", description="Импортировать монитор или дневник"),
                 BotCommand(command="add_user", description="Добавить пользователя"),
                 BotCommand(command="users", description="Показать белый список"),

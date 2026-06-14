@@ -130,6 +130,7 @@ Personal journal:
 - Users add entries with `/log <data>` or a natural-language request such as
   "Запиши сахар 6.4 ммоль/л, короткий инсулин 3 ед., прогулка 30 минут".
 - `/journal [limit]` shows only the current user's recent entries.
+- `/export_journal_csv` sends the current user's complete journal as a UTF-8 CSV.
 - `/import [year]` imports Hematonix `.xls/.xlsx` glucose readings and MelStudio
   `.txt` diary rows into the current user's journal.
 - MelStudio dates without a year use the command year or the current year.

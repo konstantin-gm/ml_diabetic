@@ -51,11 +51,13 @@ async def test_journal_entries_are_isolated_by_user(tmp_path) -> None:  # type: 
     async with sessions() as session:
         first_user_entries = await JournalRepository(session).list_recent(1001)
         second_user_entries = await JournalRepository(session).list_recent(2002)
+        first_user_export = await JournalRepository(session).list_all(1001)
 
     assert len(first_user_entries) == 1
     assert first_user_entries[0].food == "гречка"
     assert len(second_user_entries) == 1
     assert second_user_entries[0].physical_activity == "бег"
+    assert [entry.telegram_user_id for entry in first_user_export] == [1001]
     await engine.dispose()
 
 

@@ -20,6 +20,7 @@ from app.database.repositories import (
 )
 from app.services.food_export import build_foods_csv, format_food_messages
 from app.services.journal import format_journal_messages, parse_journal_limit
+from app.services.journal_export import build_journal_csv
 from app.services.journal_import import (
     JournalImportError,
     parse_import_year,
@@ -53,6 +54,7 @@ def create_router(
             "Журнал:\n"
             "/log данные — добавить запись\n"
             "/journal [количество] — показать свои записи\n"
+            "/export_journal_csv — скачать свой журнал в CSV\n"
             "/import [год] — загрузить файл монитора или дневника\n"
             "Можно написать: «Запиши сахар 6.4, углеводы 48 г, короткий 3 ед.» "
             f"или указать углеводы в ХЕ. Сейчас 1 ХЕ = {xe_grams} г углеводов.\n\n"
@@ -182,6 +184,27 @@ def create_router(
             entries = await JournalRepository(session).list_recent(message.from_user.id, limit)
         for text in format_journal_messages(entries, journal_timezone):
             await message.answer(text)
+
+    @router.message(Command("export_journal_csv"))
+    async def export_journal_csv(message: Message) -> None:
+        if message.from_user is None:
+            return
+        async with session_factory() as session:
+            entries = await JournalRepository(session).list_all(message.from_user.id)
+
+        if not entries:
+            await message.answer("Ваш журнал пока пуст, экспортировать нечего.")
+            return
+
+        timestamp = datetime.now(journal_timezone).strftime("%Y%m%d_%H%M%S")
+        document = BufferedInputFile(
+            build_journal_csv(entries, journal_timezone),
+            filename=f"journal_{timestamp}.csv",
+        )
+        await message.answer_document(
+            document,
+            caption=f"Экспорт вашего журнала: {len(entries)} записей.",
+        )
 
     async def import_document(message: Message, year_value: str | None) -> None:
         if message.from_user is None or message.document is None or message.bot is None:
