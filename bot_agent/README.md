@@ -61,7 +61,8 @@ food, carbohydrate grams, physical activity, and blood glucose in mmol/L.
 Users may enter carbohydrates in grams or bread units (ХЕ). The database stores
 grams only; `JOURNAL_XE_CARBS_GRAMS` controls the conversion and defaults to 12.
 Insulin values are stored as reported; the bot does not calculate or recommend doses.
-`/delete_last` removes only the current user's most recent journal entry.
+`/delete_last` or the phrase `Удали последнюю запись в журнале` removes only the
+current user's most recent journal entry without requiring a timestamp.
 `/edit` finds the current user's entry by local date and time to the minute and
 updates only the fields included after the timestamp.
 

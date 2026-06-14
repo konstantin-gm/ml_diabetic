@@ -9,6 +9,7 @@ from app.agent.tools import (
     FoodAgentDeps,
     add_journal_entry,
     calculate_carbs,
+    delete_last_journal_entry,
     edit_journal_entry,
     find_food,
     lookup_food_online,
@@ -28,6 +29,9 @@ INSTRUCTIONS = """
 - При исправлении передавай только явно изменяемые поля, чтобы остальные значения сохранились.
 - Если edit_journal_entry вернул null, сообщи, что запись с таким временем не найдена.
 - Если edit_journal_entry вернул текст ошибки, передай этот текст пользователю.
+- Если пользователь просит удалить последнюю или самую свежую запись журнала, сразу вызови
+  delete_last_journal_entry. Не спрашивай дату и время для удаления последней записи.
+- Если delete_last_journal_entry вернул null, сообщи, что журнал пуст; иначе подтверди удаление.
 - Записывай только явно названные значения: продолжительность в минутах, короткий и
   длинный инсулин в единицах, еду, углеводы, физическую активность и сахар в ммоль/л.
 - Если углеводы указаны в граммах, передай carbohydrates_grams. Если пользователь
@@ -83,6 +87,7 @@ def create_food_agent(
             calculate_carbs,
             add_journal_entry,
             edit_journal_entry,
+            delete_last_journal_entry,
         ],
         instructions=INSTRUCTIONS,
     )

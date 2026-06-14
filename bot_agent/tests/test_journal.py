@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -7,6 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.agent.schemas import JournalEntryCreate, JournalEntryRecord, JournalEntryUpdate
+from app.agent.tools import FoodAgentDeps, delete_last_journal_entry
 from app.database.models import Base, TelegramUser
 from app.database.repositories import JournalRepository
 from app.services.journal import format_journal_messages, parse_journal_limit
@@ -128,7 +131,19 @@ async def test_delete_last_removes_only_current_users_latest_entry(tmp_path) -> 
 
     async with sessions() as session:
         repository = JournalRepository(session)
-        deleted = await repository.delete_last(1001)
+        context = cast(
+            Any,
+            SimpleNamespace(
+                deps=FoodAgentDeps(
+                    session=session,
+                    online_lookup=cast(Any, object()),
+                    telegram_user_id=1001,
+                    journal_timezone=timezone,
+                    journal_xe_carbs_grams=Decimal("12"),
+                )
+            ),
+        )
+        deleted = await delete_last_journal_entry(context)
         await session.commit()
 
     assert deleted is not None

@@ -153,6 +153,17 @@ async def edit_journal_entry(
         return str(error)
 
 
+async def delete_last_journal_entry(
+    ctx: RunContext[FoodAgentDeps],
+) -> JournalEntryRecord | None:
+    """Delete the current Telegram user's most recent journal entry.
+
+    Use this when the user explicitly asks to delete their last or most recent
+    journal entry. No date or time is required. Return null when the journal is empty.
+    """
+    return await JournalRepository(ctx.deps.session).delete_last(ctx.deps.telegram_user_id)
+
+
 def calculate_carbs(
     ctx: RunContext[FoodAgentDeps], food: FoodData, amount_grams: Decimal
 ) -> Decimal:
