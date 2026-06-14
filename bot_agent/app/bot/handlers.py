@@ -56,6 +56,8 @@ def create_router(
             "Журнал:\n"
             "/log данные — добавить запись\n"
             "/journal [количество] — показать свои записи\n"
+            "/delete_last — удалить последнюю запись\n"
+            "/edit дата время изменения — исправить запись\n"
             "/export_journal_csv — скачать свой журнал в CSV\n"
             "/import [год] — загрузить файл монитора или дневника\n"
             "Можно написать: «Запиши сахар 6.4, углеводы 48 г, короткий 3 ед.» "
@@ -216,6 +218,20 @@ def create_router(
             return
         await run_agent(message, f"Запиши в мой журнал: {command.args}")
 
+    @router.message(Command("edit"))
+    async def edit_log_entry(message: Message, command: CommandObject) -> None:
+        if not command.args or not command.args.strip():
+            await message.answer(
+                "Использование: /edit 14.06.2026 12:30 сахар 5.8 ммоль/л, "
+                "углеводы 40 г"
+            )
+            return
+        await run_agent(
+            message,
+            "Исправь существующую запись в моём журнале. Дата и время в начале "
+            f"сообщения идентифицируют запись: {command.args}",
+        )
+
     @router.message(Command("journal"))
     async def list_journal(message: Message, command: CommandObject) -> None:
         if message.from_user is None:
@@ -230,6 +246,21 @@ def create_router(
             entries = await JournalRepository(session).list_recent(message.from_user.id, limit)
         for text in format_journal_messages(entries, journal_timezone):
             await message.answer(text)
+
+    @router.message(Command("delete_last"))
+    async def delete_last_journal_entry(message: Message) -> None:
+        if message.from_user is None:
+            return
+        async with session_factory() as session:
+            entry = await JournalRepository(session).delete_last(message.from_user.id)
+            await session.commit()
+
+        if entry is None:
+            await message.answer("Ваш журнал пока пуст, удалять нечего.")
+            return
+
+        occurred_at = entry.occurred_at.astimezone(journal_timezone).strftime("%d.%m.%Y %H:%M")
+        await message.answer(f"Последняя запись за {occurred_at} удалена.")
 
     @router.message(Command("export_journal_csv"))
     async def export_journal_csv(message: Message) -> None:

@@ -105,3 +105,28 @@ class JournalEntryRecord(JournalEntryCreate):
     telegram_user_id: int
     occurred_at: datetime
     created_at: datetime
+
+
+class JournalEntryUpdate(BaseModel):
+    occurred_at: datetime | None = None
+    duration_minutes: int | None = Field(default=None, gt=0, le=10080)
+    short_insulin_units: Decimal | None = Field(default=None, ge=0, le=1000)
+    long_insulin_units: Decimal | None = Field(default=None, ge=0, le=1000)
+    food: str | None = Field(default=None, max_length=2000)
+    carbohydrates_grams: Decimal | None = Field(default=None, ge=0, le=10000)
+    physical_activity: str | None = Field(default=None, max_length=2000)
+    blood_glucose_mmol_l: Decimal | None = Field(default=None, gt=0, le=100)
+
+    @field_validator("food", "physical_activity")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def has_changes(self) -> JournalEntryUpdate:
+        if all(value is None for value in self.model_dump().values()):
+            raise ValueError("journal update must contain at least one value")
+        return self

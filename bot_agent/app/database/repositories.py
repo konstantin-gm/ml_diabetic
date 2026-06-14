@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Sequence
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, datetime, timedelta, tzinfo
 from decimal import Decimal
 
 from sqlalchemy import or_, select
@@ -15,11 +15,16 @@ from app.agent.schemas import (
     FoodRecord,
     JournalEntryCreate,
     JournalEntryRecord,
+    JournalEntryUpdate,
     TelegramUserRecord,
 )
 from app.database.models import Food, FoodAlias, JournalEntry, TelegramUser
 
 _WHITESPACE = re.compile(r"\s+")
+
+
+class AmbiguousJournalEntryError(ValueError):
+    pass
 
 
 def normalize_food_name(value: str) -> str:
@@ -357,6 +362,66 @@ class JournalRepository:
         )
         entries = (await self._session.scalars(statement)).all()
         return [JournalEntryRecord.model_validate(entry) for entry in entries]
+
+    async def delete_last(self, telegram_user_id: int) -> JournalEntryRecord | None:
+        statement = (
+            select(JournalEntry)
+            .where(JournalEntry.telegram_user_id == telegram_user_id)
+            .order_by(JournalEntry.occurred_at.desc(), JournalEntry.id.desc())
+            .limit(1)
+        )
+        entry = await self._session.scalar(statement)
+        if entry is None:
+            return None
+
+        record = JournalEntryRecord.model_validate(entry)
+        await self._session.delete(entry)
+        await self._session.flush()
+        return record
+
+    async def update_at(
+        self,
+        telegram_user_id: int,
+        target_occurred_at: datetime,
+        data: JournalEntryUpdate,
+        default_timezone: tzinfo,
+    ) -> JournalEntryRecord | None:
+        target = target_occurred_at
+        if target.tzinfo is None:
+            target = target.replace(tzinfo=default_timezone)
+        minute_start = target.replace(second=0, microsecond=0).astimezone(UTC)
+        minute_end = minute_start + timedelta(minutes=1)
+        statement = (
+            select(JournalEntry)
+            .where(
+                JournalEntry.telegram_user_id == telegram_user_id,
+                JournalEntry.occurred_at >= minute_start,
+                JournalEntry.occurred_at < minute_end,
+            )
+            .order_by(JournalEntry.id)
+            .limit(2)
+        )
+        entries = (await self._session.scalars(statement)).all()
+        if not entries:
+            return None
+        if len(entries) > 1:
+            raise AmbiguousJournalEntryError(
+                "В указанную минуту найдено несколько записей. Уточните запись в журнале."
+            )
+
+        entry = entries[0]
+        changes = data.model_dump(exclude_none=True)
+        new_occurred_at = changes.pop("occurred_at", None)
+        if new_occurred_at is not None:
+            if new_occurred_at.tzinfo is None:
+                new_occurred_at = new_occurred_at.replace(tzinfo=default_timezone)
+            entry.occurred_at = new_occurred_at
+        for field, value in changes.items():
+            setattr(entry, field, value)
+
+        await self._session.flush()
+        await self._session.refresh(entry)
+        return JournalEntryRecord.model_validate(entry)
 
     async def add_many(
         self,

@@ -133,6 +133,9 @@ Personal journal:
 - Users add entries with `/log <data>` or a natural-language request such as
   "Запиши сахар 6.4 ммоль/л, короткий инсулин 3 ед., прогулка 30 минут".
 - `/journal [limit]` shows only the current user's recent entries.
+- `/delete_last` removes only the current user's most recent journal entry.
+- `/edit DD.MM.YYYY HH:MM changes` updates the current user's entry at that local
+  date and time while preserving omitted fields.
 - `/export_journal_csv` sends the current user's complete journal as a UTF-8 CSV.
 - `/import [year]` imports Hematonix `.xls/.xlsx` glucose readings and MelStudio
   `.txt` diary rows into the current user's journal.

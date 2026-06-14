@@ -50,6 +50,8 @@ Each authorized user has a private journal:
 /log сахар 6.4 ммоль/л, короткий инсулин 3 ед., гречка, углеводы 4 ХЕ
 /journal
 /journal 50
+/delete_last
+/edit 14.06.2026 12:30 сахар 5.8 ммоль/л, углеводы 40 г
 /export_journal_csv
 /import 2026
 ```
@@ -59,6 +61,9 @@ food, carbohydrate grams, physical activity, and blood glucose in mmol/L.
 Users may enter carbohydrates in grams or bread units (ХЕ). The database stores
 grams only; `JOURNAL_XE_CARBS_GRAMS` controls the conversion and defaults to 12.
 Insulin values are stored as reported; the bot does not calculate or recommend doses.
+`/delete_last` removes only the current user's most recent journal entry.
+`/edit` finds the current user's entry by local date and time to the minute and
+updates only the fields included after the timestamp.
 
 Send a Hematonix `.xls/.xlsx` monitor export or a MelStudio `.txt` diary as a
 Telegram document. For diary dates without a year, add `/import 2026` as the

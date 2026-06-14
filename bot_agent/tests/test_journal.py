@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.agent.schemas import JournalEntryCreate, JournalEntryRecord
+from app.agent.schemas import JournalEntryCreate, JournalEntryRecord, JournalEntryUpdate
 from app.database.models import Base, TelegramUser
 from app.database.repositories import JournalRepository
 from app.services.journal import format_journal_messages, parse_journal_limit
@@ -81,6 +81,171 @@ async def test_naive_event_time_uses_configured_timezone(tmp_path) -> None:  # t
         await session.commit()
 
     assert entry.occurred_at.utcoffset() is not None
+    await engine.dispose()
+
+
+async def test_delete_last_removes_only_current_users_latest_entry(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'delete-last.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    timezone = ZoneInfo("Europe/Moscow")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessions() as session:
+        session.add_all(
+            [
+                TelegramUser(telegram_user_id=1001, is_admin=False, is_active=True),
+                TelegramUser(telegram_user_id=2002, is_admin=False, is_active=True),
+            ]
+        )
+        await session.flush()
+        repository = JournalRepository(session)
+        older = await repository.add(
+            1001,
+            JournalEntryCreate(
+                occurred_at=datetime(2026, 6, 14, 9, 0, tzinfo=UTC),
+                food="завтрак",
+            ),
+            timezone,
+        )
+        latest = await repository.add(
+            1001,
+            JournalEntryCreate(
+                occurred_at=datetime(2026, 6, 14, 10, 0, tzinfo=UTC),
+                food="обед",
+            ),
+            timezone,
+        )
+        await repository.add(
+            2002,
+            JournalEntryCreate(
+                occurred_at=datetime(2026, 6, 14, 11, 0, tzinfo=UTC),
+                food="чужая запись",
+            ),
+            timezone,
+        )
+        await session.commit()
+
+    async with sessions() as session:
+        repository = JournalRepository(session)
+        deleted = await repository.delete_last(1001)
+        await session.commit()
+
+    assert deleted is not None
+    assert deleted.id == latest.id
+
+    async with sessions() as session:
+        repository = JournalRepository(session)
+        own_entries = await repository.list_recent(1001)
+        other_entries = await repository.list_recent(2002)
+        empty = await repository.delete_last(9999)
+
+    assert [entry.id for entry in own_entries] == [older.id]
+    assert [entry.food for entry in other_entries] == ["чужая запись"]
+    assert empty is None
+    await engine.dispose()
+
+
+async def test_update_at_changes_only_selected_users_explicit_fields(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'edit-entry.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    timezone = ZoneInfo("Europe/Moscow")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessions() as session:
+        session.add_all(
+            [
+                TelegramUser(telegram_user_id=1001, is_admin=False, is_active=True),
+                TelegramUser(telegram_user_id=2002, is_admin=False, is_active=True),
+            ]
+        )
+        await session.flush()
+        repository = JournalRepository(session)
+        own = await repository.add(
+            1001,
+            JournalEntryCreate(
+                occurred_at=datetime(2026, 6, 14, 9, 30, 45, tzinfo=UTC),
+                short_insulin_units=Decimal("3"),
+                food="гречка",
+                carbohydrates_grams=Decimal("35.5"),
+                blood_glucose_mmol_l=Decimal("6.4"),
+            ),
+            timezone,
+        )
+        other = await repository.add(
+            2002,
+            JournalEntryCreate(
+                occurred_at=datetime(2026, 6, 14, 9, 30, tzinfo=UTC),
+                blood_glucose_mmol_l=Decimal("8.1"),
+            ),
+            timezone,
+        )
+        await session.commit()
+
+    async with sessions() as session:
+        repository = JournalRepository(session)
+        updated = await repository.update_at(
+            1001,
+            datetime(2026, 6, 14, 12, 30),
+            JournalEntryUpdate(blood_glucose_mmol_l=Decimal("5.8")),
+            timezone,
+        )
+        missing = await repository.update_at(
+            1001,
+            datetime(2026, 6, 14, 14, 0),
+            JournalEntryUpdate(food="ужин"),
+            timezone,
+        )
+        await session.commit()
+
+    assert updated is not None
+    assert updated.id == own.id
+    assert updated.blood_glucose_mmol_l == Decimal("5.80")
+    assert updated.short_insulin_units == Decimal("3.00")
+    assert updated.food == "гречка"
+    assert updated.carbohydrates_grams == Decimal("35.50")
+    assert missing is None
+
+    async with sessions() as session:
+        other_entries = await JournalRepository(session).list_recent(2002)
+
+    assert other_entries[0].id == other.id
+    assert other_entries[0].blood_glucose_mmol_l == Decimal("8.10")
+    await engine.dispose()
+
+
+async def test_update_at_rejects_multiple_entries_in_same_minute(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'ambiguous-edit.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    timezone = ZoneInfo("Europe/Moscow")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessions() as session:
+        session.add(TelegramUser(telegram_user_id=1001, is_admin=False, is_active=True))
+        await session.flush()
+        repository = JournalRepository(session)
+        for second in (10, 40):
+            await repository.add(
+                1001,
+                JournalEntryCreate(
+                    occurred_at=datetime(2026, 6, 14, 9, 30, second, tzinfo=UTC),
+                    food=f"запись {second}",
+                ),
+                timezone,
+            )
+        await session.commit()
+
+    async with sessions() as session:
+        with pytest.raises(ValueError, match="несколько записей"):
+            await JournalRepository(session).update_at(
+                1001,
+                datetime(2026, 6, 14, 12, 30),
+                JournalEntryUpdate(food="исправлено"),
+                timezone,
+            )
+
     await engine.dispose()
 
 

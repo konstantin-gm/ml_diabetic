@@ -7,8 +7,17 @@ from decimal import Decimal
 from pydantic_ai import RunContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.schemas import FoodData, JournalEntryCreate, JournalEntryRecord
-from app.database.repositories import FoodRepository, JournalRepository
+from app.agent.schemas import (
+    FoodData,
+    JournalEntryCreate,
+    JournalEntryRecord,
+    JournalEntryUpdate,
+)
+from app.database.repositories import (
+    AmbiguousJournalEntryError,
+    FoodRepository,
+    JournalRepository,
+)
 from app.services.carbs import (
     calculate_carbohydrates,
     calculate_carbs_per_100g,
@@ -96,6 +105,52 @@ async def add_journal_entry(
         data,
         ctx.deps.journal_timezone,
     )
+
+
+async def edit_journal_entry(
+    ctx: RunContext[FoodAgentDeps],
+    target_occurred_at: datetime,
+    new_occurred_at: datetime | None = None,
+    duration_minutes: int | None = None,
+    short_insulin_units: Decimal | None = None,
+    long_insulin_units: Decimal | None = None,
+    food: str | None = None,
+    carbohydrates_grams: Decimal | None = None,
+    bread_units: Decimal | None = None,
+    physical_activity: str | None = None,
+    blood_glucose_mmol_l: Decimal | None = None,
+) -> JournalEntryRecord | str | None:
+    """Edit one journal entry belonging to the current Telegram user.
+
+    `target_occurred_at` is the existing entry's exact local date and time to the
+    minute. Pass only fields explicitly corrected by the user; omitted fields stay
+    unchanged. Use `new_occurred_at` only when the entry timestamp itself changes.
+    Carbohydrates may be supplied in grams or bread units, but not both.
+    """
+    resolved_carbohydrates = resolve_journal_carbohydrates(
+        carbohydrates_grams,
+        bread_units,
+        ctx.deps.journal_xe_carbs_grams,
+    )
+    data = JournalEntryUpdate(
+        occurred_at=new_occurred_at,
+        duration_minutes=duration_minutes,
+        short_insulin_units=short_insulin_units,
+        long_insulin_units=long_insulin_units,
+        food=food,
+        carbohydrates_grams=resolved_carbohydrates,
+        physical_activity=physical_activity,
+        blood_glucose_mmol_l=blood_glucose_mmol_l,
+    )
+    try:
+        return await JournalRepository(ctx.deps.session).update_at(
+            ctx.deps.telegram_user_id,
+            target_occurred_at,
+            data,
+            ctx.deps.journal_timezone,
+        )
+    except AmbiguousJournalEntryError as error:
+        return str(error)
 
 
 def calculate_carbs(
