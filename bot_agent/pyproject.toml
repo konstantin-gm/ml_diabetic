@@ -12,24 +12,33 @@ dependencies = [
     "aiogram>=3.20,<4",
     "alembic>=1.16,<2",
     "asyncpg>=0.30,<1",
+    "fastapi>=0.115,<1",
     "openai>=2.0,<3",
     "pydantic>=2.11,<3",
     "pydantic-ai-slim[openai]>=1.0,<2",
     "pydantic-settings>=2.9,<3",
     "sqlalchemy[asyncio]>=2.0.40,<3",
+    "uvicorn>=0.34,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "aiosqlite>=0.21,<1",
+    "httpx>=0.28,<1",
     "mypy>=1.15,<2",
     "pytest>=8.3,<9",
     "pytest-asyncio>=0.26,<2",
     "ruff>=0.11,<1",
 ]
+desktop = [
+    "PyQt5>=5.15,<6",
+]
+
+[project.scripts]
+diabetes-db-client = "desktop_client.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+packages = ["app", "desktop_client"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -46,4 +55,3 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-

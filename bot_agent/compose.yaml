@@ -26,5 +26,18 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  api:
+    build: .
+    command: ["uvicorn", "app.api.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    env_file: ${ENV_FILE:-.env}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://diabet:diabet@db:5432/diabet
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${ADMIN_API_PORT:-8000}:8000"
+    restart: unless-stopped
+
 volumes:
   postgres_data:

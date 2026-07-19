@@ -304,3 +304,13 @@ Implement:
 - carbohydrate calculation
 
 Create clean typed async Python code.
+
+## Stage 2 task
+
+  Implement
+
+  - API to get data from the database and to modify, add, and delete data. Database is on a remote server with telegram bot.
+  I need access from local machine.
+  - Create Python program to list tables from the database. Use Qt5 for GUI.
+
+  Create clean typed async Python code.

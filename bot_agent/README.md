@@ -84,11 +84,23 @@ Excel-friendly UTF-8 CSV. Other users' records are never included.
 The bot only calculates carbohydrates. It does not recommend insulin doses or
 provide medical advice.
 
+## Database administration API and desktop client
+
+Stage 2 adds a token-protected FastAPI service and a PyQt5 desktop client. The
+client lists `foods`, `food_aliases`, `telegram_users`, and `journal_entries`,
+and can add, edit, or delete rows. The API exposes only these explicitly
+configured tables and never accepts arbitrary SQL.
+
+The API port is bound to `127.0.0.1` on the VDS. Access it from another machine
+through an SSH tunnel; do not expose PostgreSQL or the API directly to the
+internet. Full setup and usage instructions are in
+[DEPLOYMENT_VDS.md](DEPLOYMENT_VDS.md#10-доступ-к-базе-через-api-и-qt5-клиент).
+
 ## Run with Docker Compose
 
 ```bash
 cp .env.example .env
-# Fill TELEGRAM_BOT_TOKEN and OPENAI_API_KEY in .env
+# Fill TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, and ADMIN_API_TOKEN in .env
 docker compose up --build
 ```
 
@@ -106,7 +118,7 @@ Python 3.12+ and a running PostgreSQL instance are required.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e '.[dev]'
+pip install -e '.[dev,desktop]'
 cp .env.example .env
 alembic upgrade head
 python -m app.main
@@ -116,6 +128,6 @@ Run checks:
 
 ```bash
 ruff check .
-mypy app
+mypy app desktop_client
 pytest
 ```

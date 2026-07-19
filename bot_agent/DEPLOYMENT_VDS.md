@@ -75,8 +75,13 @@ OPENAI_MODEL=gpt-5.4-mini
 TELEGRAM_ADMIN_IDS=123456789
 JOURNAL_TIMEZONE=Europe/Moscow
 JOURNAL_XE_CARBS_GRAMS=12
+ADMIN_API_TOKEN=replace_with_a_random_token
+ADMIN_API_PORT=8000
 LOG_LEVEL=INFO
 ```
+
+Создайте стойкий токен API командой `openssl rand -hex 32` и вставьте результат
+в `ADMIN_API_TOKEN`. Этот же токен понадобится в настройках локального клиента.
 
 `TELEGRAM_ADMIN_IDS` содержит числовые Telegram ID администраторов через
 запятую. Это не username. `DATABASE_URL` из `.env.example` можно оставить без
@@ -90,6 +95,7 @@ LOG_LEVEL=INFO
 sudo docker compose up -d --build
 sudo docker compose ps
 sudo docker compose logs --tail=100 bot
+sudo docker compose logs --tail=100 api
 ```
 
 Контейнер бота автоматически применяет миграции Alembic перед запуском. В
@@ -191,3 +197,58 @@ sudo docker compose logs --tail=100 db
 
 PostgreSQL опубликован только на `127.0.0.1`, поэтому открывать порт 5434 в
 firewall не требуется.
+
+## 10. Доступ к базе через API и Qt5-клиент
+
+API запускается контейнером `api` и публикуется только на loopback-интерфейсе
+VDS: `127.0.0.1:8000`. Не меняйте привязку на `0.0.0.0`: токен защищает API,
+но шифрование соединения обеспечивает SSH-туннель.
+
+Проверьте API на VDS, не выводя токен в историю команд:
+
+```bash
+cd /opt/ml_diabetic/bot_agent
+sudo docker compose ps
+sudo docker compose logs --tail=100 api
+```
+
+На локальном компьютере установите клиент из каталога проекта:
+
+```bash
+cd ml_diabetic/bot_agent
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[desktop]'
+cp .env.desktop.example .env.desktop
+chmod 600 .env.desktop
+```
+
+Укажите в `.env.desktop` тот же токен, что и в `.env` на VDS:
+
+```env
+API_BASE_URL=http://127.0.0.1:8000
+ADMIN_API_TOKEN=the_same_token_as_on_vds
+API_TIMEOUT_SECONDS=30
+```
+
+Откройте SSH-туннель в отдельном терминале и оставьте его работающим:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 USER@SERVER_IP
+```
+
+Затем запустите клиент:
+
+```bash
+cd ml_diabetic/bot_agent
+source .venv/bin/activate
+diabetes-db-client
+```
+
+Кнопки «Добавить» и «Изменить» открывают форму полей выбранной таблицы.
+«Удалить» всегда требует подтверждения. Удаление продукта также удаляет его
+псевдонимы, а удаление пользователя — весь принадлежащий ему журнал.
+
+Интерактивная документация API доступна через тот же туннель по адресу
+`http://127.0.0.1:8000/docs`. Для запросов требуется заголовок
+`Authorization: Bearer <ADMIN_API_TOKEN>`.
