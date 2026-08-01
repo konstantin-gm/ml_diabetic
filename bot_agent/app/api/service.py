@@ -25,10 +25,15 @@ class TableService:
 
     async def list_rows(self, spec: TableSpec, offset: int, limit: int) -> TablePage:
         primary_key = getattr(spec.model, spec.info.primary_key)
+        sort_column = getattr(spec.model, spec.sort_field) if spec.sort_field else primary_key
+        sort_expression = sort_column.desc() if spec.sort_descending else sort_column.asc()
+        ordering = [sort_expression]
+        if sort_column is not primary_key:
+            ordering.append(primary_key.desc() if spec.sort_descending else primary_key.asc())
         total = int(
             await self._session.scalar(select(func.count()).select_from(spec.model)) or 0
         )
-        statement = select(spec.model).order_by(primary_key).offset(offset).limit(limit)
+        statement = select(spec.model).order_by(*ordering).offset(offset).limit(limit)
         rows = (await self._session.scalars(statement)).all()
         return TablePage(
             table=spec.info.name,

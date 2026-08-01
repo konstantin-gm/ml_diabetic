@@ -148,6 +148,44 @@ async def test_api_rejects_unknown_tables_and_invalid_updates(tmp_path) -> None:
     await engine.dispose()
 
 
+async def test_api_orders_journal_entries_by_occurred_at_newest_first(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    app, engine = await _create_test_app(tmp_path)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            "/api/v1/tables/telegram_users/rows",
+            headers=AUTH_HEADERS,
+            json={"telegram_user_id": 1001},
+        )
+        for occurred_at in (
+            "2026-07-18T12:30:00+03:00",
+            "2026-07-20T08:15:00+03:00",
+            "2026-07-19T19:45:00+03:00",
+        ):
+            response = await client.post(
+                "/api/v1/tables/journal_entries/rows",
+                headers=AUTH_HEADERS,
+                json={
+                    "telegram_user_id": 1001,
+                    "occurred_at": occurred_at,
+                    "food": occurred_at,
+                },
+            )
+            assert response.status_code == 201
+
+        page = await client.get(
+            "/api/v1/tables/journal_entries/rows",
+            headers=AUTH_HEADERS,
+        )
+
+    assert page.status_code == 200
+    assert [row["food"] for row in page.json()["rows"]] == [
+        "2026-07-20T08:15:00+03:00",
+        "2026-07-19T19:45:00+03:00",
+        "2026-07-18T12:30:00+03:00",
+    ]
+    await engine.dispose()
+
+
 async def _create_test_app(tmp_path):  # type: ignore[no-untyped-def]
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'api.db'}")
     async with engine.begin() as connection:

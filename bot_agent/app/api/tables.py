@@ -26,6 +26,8 @@ class TableSpec:
     create_schema: type[BaseModel]
     update_schema: type[BaseModel]
     non_nullable_fields: frozenset[str]
+    sort_field: str | None = None
+    sort_descending: bool = False
 
 
 def _field(
@@ -145,6 +147,8 @@ TABLE_SPECS = (
         create_schema=JournalRowCreate,
         update_schema=JournalRowUpdate,
         non_nullable_fields=frozenset({"telegram_user_id", "occurred_at"}),
+        sort_field="occurred_at",
+        sort_descending=True,
     ),
 )
 
