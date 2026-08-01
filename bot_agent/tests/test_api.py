@@ -186,6 +186,64 @@ async def test_api_orders_journal_entries_by_occurred_at_newest_first(tmp_path) 
     await engine.dispose()
 
 
+async def test_api_returns_glucose_points_for_selected_interval(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    app, engine = await _create_test_app(tmp_path)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for user_id in (1001, 2002):
+            await client.post(
+                "/api/v1/tables/telegram_users/rows",
+                headers=AUTH_HEADERS,
+                json={"telegram_user_id": user_id},
+            )
+        for user_id, occurred_at, glucose in (
+            (1001, "2026-07-18T12:00:00+03:00", "5.2"),
+            (1001, "2026-07-19T09:00:00+03:00", "6.4"),
+            (2002, "2026-07-19T18:00:00+03:00", "7.1"),
+            (1001, "2026-07-19T20:00:00+03:00", None),
+            (1001, "2026-07-21T08:00:00+03:00", "8.3"),
+        ):
+            payload: dict[str, object] = {
+                "telegram_user_id": user_id,
+                "occurred_at": occurred_at,
+            }
+            if glucose is None:
+                payload["food"] = "без измерения сахара"
+            else:
+                payload["blood_glucose_mmol_l"] = glucose
+            response = await client.post(
+                "/api/v1/tables/journal_entries/rows",
+                headers=AUTH_HEADERS,
+                json=payload,
+            )
+            assert response.status_code == 201
+
+        plot = await client.get(
+            "/api/v1/plots/glucose",
+            headers=AUTH_HEADERS,
+            params={
+                "start": "2026-07-19T00:00:00+03:00",
+                "stop": "2026-07-20T00:00:00+03:00",
+            },
+        )
+        invalid = await client.get(
+            "/api/v1/plots/glucose",
+            headers=AUTH_HEADERS,
+            params={
+                "start": "2026-07-20T00:00:00+03:00",
+                "stop": "2026-07-19T00:00:00+03:00",
+            },
+        )
+
+    assert plot.status_code == 200
+    assert [point["telegram_user_id"] for point in plot.json()["points"]] == [1001, 2002]
+    assert [point["blood_glucose_mmol_l"] for point in plot.json()["points"]] == [
+        "6.40",
+        "7.10",
+    ]
+    assert invalid.status_code == 422
+    await engine.dispose()
+
+
 async def _create_test_app(tmp_path):  # type: ignore[no-untyped-def]
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'api.db'}")
     async with engine.begin() as connection:

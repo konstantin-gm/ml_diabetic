@@ -8,9 +8,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas import TablePage
+from app.api.schemas import GlucosePlotData, GlucosePoint, TablePage
 from app.api.tables import TableSpec
-from app.database.models import Base
+from app.database.models import Base, JournalEntry
 from app.database.repositories import normalize_food_name
 
 
@@ -121,3 +121,41 @@ class TableService:
             else:
                 result[field.name] = value
         return result
+
+
+async def load_glucose_plot_data(
+    session: AsyncSession,
+    start: datetime,
+    stop: datetime,
+) -> GlucosePlotData:
+    if start.tzinfo is None or stop.tzinfo is None:
+        raise ValueError("Plot interval must include a timezone")
+    if start >= stop:
+        raise ValueError("Plot start must be earlier than stop")
+
+    normalized_start = start.astimezone(UTC)
+    normalized_stop = stop.astimezone(UTC)
+    statement = (
+        select(JournalEntry)
+        .where(
+            JournalEntry.occurred_at >= normalized_start,
+            JournalEntry.occurred_at <= normalized_stop,
+            JournalEntry.blood_glucose_mmol_l.is_not(None),
+        )
+        .order_by(JournalEntry.occurred_at, JournalEntry.id)
+    )
+    rows = (await session.scalars(statement)).all()
+    points = [
+        GlucosePoint(
+            telegram_user_id=row.telegram_user_id,
+            occurred_at=_ensure_timezone(row.occurred_at),
+            blood_glucose_mmol_l=row.blood_glucose_mmol_l,
+        )
+        for row in rows
+        if row.blood_glucose_mmol_l is not None
+    ]
+    return GlucosePlotData(start=normalized_start, stop=normalized_stop, points=points)
+
+
+def _ensure_timezone(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)

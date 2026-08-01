@@ -40,6 +40,18 @@ class TablePage(BaseModel):
     rows: list[dict[str, Any]]
 
 
+class GlucosePoint(BaseModel):
+    telegram_user_id: int
+    occurred_at: datetime
+    blood_glucose_mmol_l: Decimal
+
+
+class GlucosePlotData(BaseModel):
+    start: datetime
+    stop: datetime
+    points: list[GlucosePoint]
+
+
 class FoodRowCreate(RowPayload):
     canonical_name: str = Field(min_length=1, max_length=200)
     ru_name: str = Field(min_length=1, max_length=200)

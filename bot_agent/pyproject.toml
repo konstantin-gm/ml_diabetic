@@ -32,6 +32,8 @@ dev = [
 ]
 desktop = [
     "PyQt5>=5.15,<6",
+    "PyQtWebEngine>=5.15,<6",
+    "plotly>=6,<7",
 ]
 
 [project.scripts]

@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from pydantic import ValidationError
+from PyQt5.QtCore import QDateTime, QUrl
+from PyQt5.QtGui import QCloseEvent
+from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QDateTimeEdit,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -15,14 +22,16 @@ from PyQt5.QtWidgets import (
     QStatusBar,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from app.api.schemas import TableInfo, TablePage
+from app.api.schemas import GlucosePlotData, TableInfo, TablePage
 from desktop_client.api_client import ApiClient
 from desktop_client.config import DesktopSettings
 from desktop_client.dialogs import RecordDialog
+from desktop_client.plots import build_glucose_plot_html
 
 USER_ROLE = 0x0100
 
@@ -36,6 +45,8 @@ class MainWindow(QMainWindow):
         self._tables: dict[str, TableInfo] = {}
         self._page: TablePage | None = None
         self._offset = 0
+        self._plot_directory = TemporaryDirectory(prefix="diabetes-glucose-plot-")
+        self._plot_sequence = 0
         self._client = ApiClient(
             settings.api_base_url,
             settings.admin_api_token.get_secret_value(),
@@ -89,12 +100,42 @@ class MainWindow(QMainWindow):
         bottom.addWidget(QLabel("Строк на странице:"))
         bottom.addWidget(self._page_size)
 
-        central = QWidget()
-        layout = QVBoxLayout(central)
-        layout.addLayout(top)
-        layout.addWidget(self._grid, 1)
-        layout.addLayout(bottom)
-        self.setCentralWidget(central)
+        tables_tab = QWidget()
+        tables_layout = QVBoxLayout(tables_tab)
+        tables_layout.addLayout(top)
+        tables_layout.addWidget(self._grid, 1)
+        tables_layout.addLayout(bottom)
+
+        current_time = QDateTime.currentDateTime()
+        self._plot_start = QDateTimeEdit(current_time.addDays(-7))
+        self._plot_stop = QDateTimeEdit(current_time)
+        for editor in (self._plot_start, self._plot_stop):
+            editor.setCalendarPopup(True)
+            editor.setDisplayFormat("dd.MM.yyyy HH:mm")
+        self._glucose_button = QPushButton("Glucose")
+        self._glucose_button.clicked.connect(self.plot_glucose)
+
+        plot_controls = QHBoxLayout()
+        plot_controls.addWidget(QLabel("Start:"))
+        plot_controls.addWidget(self._plot_start)
+        plot_controls.addWidget(QLabel("Stop:"))
+        plot_controls.addWidget(self._plot_stop)
+        plot_controls.addWidget(self._glucose_button)
+        plot_controls.addStretch(1)
+
+        self._plot_view = QWebEngineView()
+        self._plot_view.setHtml(
+            "<html><body><p>Select an interval and click Glucose.</p></body></html>"
+        )
+        plots_tab = QWidget()
+        plots_layout = QVBoxLayout(plots_tab)
+        plots_layout.addLayout(plot_controls)
+        plots_layout.addWidget(self._plot_view, 1)
+
+        tabs = QTabWidget()
+        tabs.addTab(tables_tab, "Tables")
+        tabs.addTab(plots_tab, "Plots")
+        self.setCentralWidget(tabs)
         status_bar = self.statusBar()
         assert status_bar is not None
         self._status_bar: QStatusBar = status_bar
@@ -120,6 +161,18 @@ class MainWindow(QMainWindow):
         dialog = RecordDialog(table, parent=self)
         if dialog.exec_() == RecordDialog.Accepted and dialog.payload is not None:
             self._client.create_row(table.name, dialog.payload)
+
+    def plot_glucose(self) -> None:
+        start_seconds = self._plot_start.dateTime().toSecsSinceEpoch()
+        stop_seconds = self._plot_stop.dateTime().toSecsSinceEpoch()
+        if start_seconds >= stop_seconds:
+            QMessageBox.warning(self, "Invalid interval", "Start must be earlier than Stop.")
+            return
+        start = datetime.fromtimestamp(start_seconds, UTC).isoformat()
+        stop = datetime.fromtimestamp(stop_seconds, UTC).isoformat()
+        self._status_bar.showMessage("Loading glucose measurements…")
+        self._glucose_button.setEnabled(False)
+        self._client.load_glucose(start, stop)
 
     def edit_row(self) -> None:
         table = self.current_table()
@@ -186,6 +239,9 @@ class MainWindow(QMainWindow):
                 if current_table is not None and page.table == current_table.name:
                     self._show_page(page)
                 return
+            if operation == "plot:glucose":
+                self._show_glucose_plot(GlucosePlotData.model_validate(payload))
+                return
         except (ValidationError, ValueError) as error:
             self._request_failed(operation, f"Некорректный ответ API: {error}")
             return
@@ -194,7 +250,8 @@ class MainWindow(QMainWindow):
         self.refresh_rows()
 
     def _request_failed(self, operation: str, message: str) -> None:
-        del operation
+        if operation == "plot:glucose":
+            self._glucose_button.setEnabled(True)
         self._status_bar.showMessage("Ошибка запроса.", 5000)
         QMessageBox.critical(self, "Ошибка API", message)
 
@@ -235,6 +292,19 @@ class MainWindow(QMainWindow):
         self._next_button.setEnabled(page.offset + page.limit < page.total)
         self._status_bar.showMessage(f"Загружено строк: {len(page.rows)}", 5000)
 
+    def _show_glucose_plot(self, data: GlucosePlotData) -> None:
+        self._plot_sequence += 1
+        path = Path(self._plot_directory.name) / "glucose.html"
+        path.write_text(build_glucose_plot_html(data), encoding="utf-8")
+        url = QUrl.fromLocalFile(str(path))
+        url.setQuery(f"version={self._plot_sequence}")
+        self._plot_view.load(url)
+        self._glucose_button.setEnabled(True)
+        self._status_bar.showMessage(
+            f"Loaded glucose measurements: {len(data.points)}",
+            5000,
+        )
+
     def _selected_record(self) -> dict[str, Any] | None:
         selection_model = self._grid.selectionModel()
         assert selection_model is not None
@@ -250,3 +320,7 @@ class MainWindow(QMainWindow):
         self._edit_button.setEnabled(enabled)
         self._delete_button.setEnabled(enabled)
         self._refresh_button.setEnabled(enabled)
+
+    def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
+        self._plot_directory.cleanup()
+        super().closeEvent(event)

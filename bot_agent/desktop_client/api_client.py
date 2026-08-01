@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlencode
 
 from PyQt5.QtCore import QByteArray, QObject, QUrl, pyqtSignal
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
@@ -34,6 +35,10 @@ class ApiClient(QObject):
             "GET",
             f"/api/v1/tables/{table}/rows?offset={offset}&limit={limit}",
         )
+
+    def load_glucose(self, start: str, stop: str) -> None:
+        query = urlencode({"start": start, "stop": stop})
+        self._request("plot:glucose", "GET", f"/api/v1/plots/glucose?{query}")
 
     def create_row(self, table: str, payload: dict[str, Any]) -> None:
         self._request(f"create:{table}", "POST", f"/api/v1/tables/{table}/rows", payload)

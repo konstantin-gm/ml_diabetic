@@ -1,6 +1,7 @@
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Annotated, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -12,8 +13,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.api.config import ApiSettings
-from app.api.schemas import TableInfo, TablePage
-from app.api.service import RowNotFoundError, TableService
+from app.api.schemas import GlucosePlotData, TableInfo, TablePage
+from app.api.service import RowNotFoundError, TableService, load_glucose_plot_data
 from app.api.tables import TABLE_SPECS, TableSpec, get_table_spec
 from app.database.session import create_engine_and_session_factory
 
@@ -81,6 +82,13 @@ def create_app(
     @router.get("/tables", response_model=list[TableInfo])
     async def list_tables() -> list[TableInfo]:
         return [spec.info for spec in TABLE_SPECS]
+
+    @router.get("/plots/glucose", response_model=GlucosePlotData)
+    async def glucose_plot(start: datetime, stop: datetime, session: Session) -> GlucosePlotData:
+        try:
+            return await load_glucose_plot_data(session, start, stop)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @router.get("/tables/{table_name}/rows", response_model=TablePage)
     async def list_rows(

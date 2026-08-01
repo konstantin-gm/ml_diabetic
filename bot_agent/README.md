@@ -88,7 +88,8 @@ provide medical advice.
 
 Stage 2 adds a token-protected FastAPI service and a PyQt5 desktop client. The
 client lists `foods`, `food_aliases`, `telegram_users`, and `journal_entries`,
-and can add, edit, or delete rows. The API exposes only these explicitly
+and can add, edit, or delete rows. Its Plots tab draws Plotly glucose charts
+for a selected time interval. The API exposes only these explicitly
 configured tables and never accepts arbitrary SQL.
 
 The API port is bound to `127.0.0.1` on the VDS. Access it from another machine
